@@ -12,6 +12,26 @@ void  CheckSippers() {
   // Monitor Left Sip
   leftmillis = millis();
 
+  int val = digitalRead(LeftSip);
+  if (val == LOW && leftState == LOW) {
+    // Do nothing
+  } else if (val == HIGH && leftState == HIGH) {
+    // Do nothing
+  } else {
+    leftState = val;
+    stateChanged = 1;
+  }
+
+  val = digitalRead(RightSip);
+  if (val == LOW && rightState == LOW) {
+    // Do nothing
+  } else if (val == HIGH && rightState == HIGH) {
+    // Do nothing
+  } else {
+    rightState = val;
+    stateChanged = 1;
+  }
+
   shock = false;
   while (digitalRead (LeftSip) == LOW) {  // if left sip beam is broken
     digitalWrite (outLeft, HIGH); //Left output HIGH

@@ -51,7 +51,7 @@ void StartUpCommands () {
     Read stored flash data
   ********************************************************/
   sipper = my_flash_store.read();
-  Sip = sipper.deviceNumber;
+  //Sip = sipper.deviceNumber;
   ShockProbRight = sipper.rightProb;
   ShockProbLeft = sipper.leftProb;
 

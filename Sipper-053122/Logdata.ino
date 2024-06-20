@@ -1,9 +1,11 @@
 void LogData() {
-  if ((rtc.getEpoch() - StartTime) > logtime + 10) {
+  if (stateChanged) {
     Blink(RED_LED, 50, 3);  //blink while logging
     WriteToSD();
     logfile.flush();
-    delay (100);
+    
+    // Reset saved state
+    stateChanged = 0;
     logtime = (rtc.getEpoch() - StartTime);
   }
 }
@@ -30,18 +32,21 @@ void CreateFile() {
 
 // Write data header to file of uSD.
 void writeHeader() {
-  logfile.println("MM:DD:YYYY hh:mm:ss, ElapsedSecs, Device, LeftCount, LeftDuration, RightCount, RightDuration, Shocks, LeftShockProbability, RightShockProbability, BatteryVoltage");
+  logfile.println("YYYY-MM-DD hh:mm:ss, Millseconds, Device, LeftState, RightState, BatteryVoltage");
   ReadBatteryLevel();
   WriteToSD();  //Write one line of zeros to logfile to note start of session
 }
 
 // Write data to SD
 void WriteToSD() {
-  logfile.print(rtc.getMonth());
-  logfile.print("/");
-  logfile.print(rtc.getDay());
-  logfile.print("/");
+  // Date, device, left 1 or 0, right 1 or 0
+
+
   logfile.print(rtc.getYear() + 2000);
+  logfile.print("-");
+  logfile.print(rtc.getMonth());
+  logfile.print("-");
+  logfile.print(rtc.getDay());
   logfile.print(" ");
   logfile.print(rtc.getHours());
   logfile.print(":");
@@ -53,23 +58,13 @@ void WriteToSD() {
     logfile.print('0');      // Trick to add leading zero for formatting
   logfile.print(rtc.getSeconds());
   logfile.print(",");
-  logfile.print(rtc.getEpoch() - StartTime); //elapsed time
+  logfile.print(millis());
   logfile.print(",");
-  logfile.print(Sip); // Print device name
+  logfile.print(Sip);
   logfile.print(",");
-  logfile.print(LeftCount);
+  logfile.print(leftState);
   logfile.print(",");
-  logfile.print(LeftDuration);
-  logfile.print(",");
-  logfile.print(RightCount);
-  logfile.print(",");
-  logfile.print(RightDuration);
-  logfile.print(",");
-  logfile.print(ShockCount);
-  logfile.print(",");
-  logfile.print(ShockProbLeft);
-  logfile.print(",");
-  logfile.print(ShockProbRight);
+  logfile.print(rightState);
   logfile.print(",");
   logfile.println(measuredvbat); // Print battery voltage
 }
@@ -85,7 +80,7 @@ void error(uint8_t errno) {
 
 void getFilename(char *filename) {
   sipper = my_flash_store.read();
-  Sip = sipper.deviceNumber;
+  //Sip = sipper.deviceNumber;
   filename[3] = (Sip / 100) % 10 + '0';
   filename[4] = (Sip / 10) % 10 + '0';
   filename[5] = Sip % 10 + '0';

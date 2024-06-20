@@ -56,7 +56,7 @@ unsigned long leftmillis = millis();
 unsigned long rightmillis = millis();
 unsigned long startmillis = millis();
 char buf[21];
-int logfreq = 10;  // Change this to edit minimum seconds between rows in data file
+int logfreq = 1;  // Change this to edit minimum seconds between rows in data file
 int SetSequence = 0;
 int RightProb = 100;
 int ShockProbRight = 0;
@@ -66,6 +66,11 @@ bool shock = false;
 bool BeAwake = true;
 bool SleepDisplay = false;
 unsigned long StartTime;
+
+// Set to 1 if a state has changed and data should be logged
+int stateChanged = 0;
+int leftState = LOW;
+int rightState = LOW;
 
 /********************************************************
   Setup flash memory

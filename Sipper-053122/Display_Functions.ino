@@ -145,7 +145,7 @@ void DisplayTimeElapsed() {
 ********************************************************/
 void DisplayStartScreen() {
   sipper = my_flash_store.read();
-  Sip = sipper.deviceNumber;
+  //Sip = sipper.deviceNumber;
   display.setCursor(5, 0);
   if (rtc.getMonth() < 10)
     display.print('0');   // Trick to add leading zero for formatting
