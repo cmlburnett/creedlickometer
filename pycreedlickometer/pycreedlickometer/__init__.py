@@ -26,6 +26,7 @@ class StatBot:
 			self.Quartile25 = None
 			self.Median = None
 			self.Quartile75 = None
+			self.IQR = None
 		else:
 			self.Minimum = min(self.Data)
 			self.Maximum = max(self.Data)
@@ -37,6 +38,7 @@ class StatBot:
 			self.Quartile25 = q[0]
 			self.Median = q[1]
 			self.Quartile75 = q[2]
+			self.IQR = q[2]-q[0]
 
 class CreedLickometer:
 	def __init__(self, fname):
@@ -408,7 +410,50 @@ class CreedLickometer:
 		fig.savefig(fname)
 		pyplot.close()
 
-def foo(fname, o):
+	def PlotBoutBoxplot(self, fname, limitextremes=True):
+		fig,axes = pyplot.subplots(1)
+		fig.autofmt_xdate()
+		fig.suptitle("Box Plot for %s" % fname)
+
+		axes.set_ylabel('BoutTime (ms)')
+		axes.boxplot( [self.LeftBouts, self.RightBouts], labels=['Left', 'Right'])
+
+		if limitextremes:
+			# With extreme outliers, the box plot gets squished into nohting so this limits the y-axis
+			# to the min/max data point or no more than the definition of "extreme outlier" of Q25-3*IQR or Q75+3*IQR
+			# This will remove outliers from the plot bu that makes the plot more useful
+
+			if self.LeftBoutStats.Length != 0 and self.RightBoutStats.Length != 0:
+				ymin_l = max(self.LeftBoutStats.Minimum, self.LeftBoutStats.Quartile25 - 3*self.LeftBoutStats.IQR)
+				ymin_r = max(self.RightBoutStats.Minimum, self.RightBoutStats.Quartile25 - 3*self.RightBoutStats.IQR)
+				ymin = min(ymin_l, ymin_r)
+
+				ymax_l = min(self.LeftBoutStats.Maximum, self.LeftBoutStats.Quartile75 + 3*self.LeftBoutStats.IQR)
+				ymax_r = min(self.RightBoutStats.Maximum, self.RightBoutStats.Quartile75 + 3*self.RightBoutStats.IQR)
+				ymax = max(ymax_l, ymax_r)
+
+			elif self.LeftBoutStats.Length == 0:
+				ymin = max(self.RightBoutStats.Minimum, self.RightBoutStats.Quartile25 - 3*self.RightBoutStats.IQR)
+				ymax = min(self.RightBoutStats.Maximum, self.RightBoutStats.Quartile75 + 3*self.RightBoutStats.IQR)
+			elif self.RightBoutStats.Length == 0:
+				ymin = max(self.RightBoutStats.Minimum, self.RightBoutStats.Quartile25 - 3*self.RightBoutStats.IQR)
+				ymax = min(self.RightBoutStats.Maximum, self.RightBoutStats.Quartile75 + 3*self.RightBoutStats.IQR)
+			else:
+				raise NotImplementedError("Plotting no data?")
+
+			ymin *= 0.95
+			ymax *= 1.05
+
+			axes.set_ylim((ymin,ymax))
+
+		else:
+			pass
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+def printstats(fname, o):
 	if True:
 		print("================ LEFT BOUTS ================")
 		print(o.LeftBouts)
@@ -468,9 +513,10 @@ for fname in fnames:
 	o.Load()
 	o.Process()
 
-	foo(fname, o)
+	printstats(fname, o)
 
 	o.PlotVsTime(fname + "-vstime.png")
 	o.PlotBoutRepetitions(fname + "-boutrepititions.png")
 	o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
+	o.PlotBoutBoxplot(fname + '-boxplot.png')
 
