@@ -39,6 +39,12 @@ def load(fname):
 			left = int(row[3])
 			right = int(row[4])
 
+			# Both start at zero and the first time in the file
+			if not len(left_cumulative):
+				left_cumulative.append( (dt,left_cumulative_time) )
+			if not len(right_cumulative):
+				right_cumulative.append( (dt,right_cumulative_time) )
+
 			#print([dt, ms, devid, left, right])
 
 			if not len(lefts) and not len(rights):
@@ -101,6 +107,10 @@ def load(fname):
 				else:
 					pass
 
+	# End both at the same time
+	left_cumulative.append( (dt,left_cumulative_time) )
+	right_cumulative.append( (dt,right_cumulative_time) )
+
 	lefts_bout_durations.sort()
 	lefts_interbout_durations.sort()
 	rights_bout_durations.sort()
@@ -120,7 +130,7 @@ def load(fname):
 		print("================ RIGHT INTER BOUTS ================")
 		for z in rights_interbout_durations:
 			print(z)
-	if True:
+	if False:
 		print("================ LEFT BOUTS ================")
 		print(lefts_bout_durations)
 		print("================ RIGHT BOUTS ================")
