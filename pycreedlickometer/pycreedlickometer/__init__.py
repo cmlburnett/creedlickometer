@@ -238,6 +238,7 @@ class CreedLickometer:
 		"""
 
 		fig,axes = pyplot.subplots(2)
+		fig.suptitle("VsTime for %s" % fname)
 
 		axes[0].set_ylabel("Left (# Bouts)")
 		axes[1].set_ylabel("Right (# Bouts)")
@@ -303,6 +304,7 @@ class CreedLickometer:
 		"""
 
 		fig,axes = pyplot.subplots(2)
+		fig.suptitle("Bout Repititions for %s" % fname)
 
 		axes[0].set_ylabel("Left (# Bouts)")
 		axes[1].set_ylabel("Right (# Bouts)")
@@ -380,13 +382,14 @@ class CreedLickometer:
 		fig.savefig(fname)
 		pyplot.close()
 
-	def PlotCumulativeBoutTImes(self, fname):
+	def PlotCumulativeBoutTimes(self, fname):
 		"""
 		Plot cumulative bout times.
 		"""
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
+		fig.suptitle("Cumulative Bout Times for %s" % fname)
 
 		axes.set_xlabel("Time (ms)")
 		axes.set_ylabel("Cumulative Time (min)")
@@ -469,5 +472,5 @@ for fname in fnames:
 
 	o.PlotVsTime(fname + "-vstime.png")
 	o.PlotBoutRepetitions(fname + "-boutrepititions.png")
-	o.PlotCumulativeBoutTImes(fname + "-cumulativebouttimes.png")
+	o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
 
