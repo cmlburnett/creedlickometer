@@ -257,35 +257,41 @@ class CreedLickometer:
 
 		# X data is datetime values
 		# Y data is bout counts per time
-		x = []
-		y = []
+		xl = []
+		yl = []
 		# Iterate over the whole time so that zeroes can be injected to plot nicely
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
 			dt = start + datetime.timedelta(minutes=minute)
-			x.append(dt)
+			xl.append(dt)
 			if dt in keys:
-				y.append(len(self.LeftVsTime[dt]))
+				yl.append(len(self.LeftVsTime[dt]))
 			else:
 				# If there isn't a data point at this time, then there were zero bouts
-				y.append(0)
+				yl.append(0)
 
-		axes[0].plot(x, y)
 
 		# -------- RIGHT --------
 		# Should mirror left except by the use of RightVsTime instead
 		keys = list(self.RightVsTime.keys())
 		keys.sort()
 
-		x = []
-		y = []
+		xr = []
+		yr = []
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
 			dt = start + datetime.timedelta(minutes=minute)
-			x.append(dt)
+			xr.append(dt)
 			if dt in keys:
-				y.append(len(self.RightVsTime[dt]))
+				yr.append(len(self.RightVsTime[dt]))
 			else:
-				y.append(0)
-		axes[1].plot(x, y)
+				yr.append(0)
+
+		# Want y-axis on both to match
+		maxy = max(max(yl), max(yr))
+		axes[0].set_ylim(0,maxy)
+		axes[1].set_ylim(0,maxy)
+
+		axes[0].plot(xl, yl)
+		axes[1].plot(xr, yr)
 
 		# SAVE IT
 		fig.savefig(fname)
@@ -362,8 +368,8 @@ class CreedLickometer:
 				# If there isn't a data point at this time, then there were zero bouts
 				yr.append(cnt)
 
+		# Want y-axis on both to match
 		maxy = max(max(yl), max(yr))
-
 		axes[0].set_ylim(0,maxy)
 		axes[1].set_ylim(0,maxy)
 
