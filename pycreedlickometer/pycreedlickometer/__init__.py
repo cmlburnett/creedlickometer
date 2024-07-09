@@ -441,6 +441,7 @@ class CreedLickometer:
 			else:
 				raise NotImplementedError("Plotting no data?")
 
+			# Fudge the bounds a little just to add some padding
 			ymin *= 0.95
 			ymax *= 1.05
 
@@ -448,6 +449,62 @@ class CreedLickometer:
 
 		else:
 			pass
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+	def PlotBoutHistogram_Overlap(self, fname, bins=25):
+		fig,axes = pyplot.subplots(1)
+		fig.autofmt_xdate()
+		fig.suptitle("Bout Histogram for %s" % fname)
+
+		colors = ['blue', 'orange']
+		axes.hist( [self.LeftBouts, self.RightBouts], bins=bins, color=colors, label=['Left', 'Right'])
+		axes.set_xlabel('Bins of Time (ms)')
+		axes.legend(loc='upper right')
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+	def PlotBoutHistogram_SideBySide(self, fname, bins=25):
+		fig,axes = pyplot.subplots(1,2)
+		fig.autofmt_xdate()
+		fig.suptitle("Bout Histogram for %s" % fname)
+
+		axes[0].set_xlabel('Left (Bins of Time (ms))')
+		axes[1].set_xlabel('Right (Bins of Time (ms))')
+		axes[0].hist(self.LeftBouts, bins=bins, color='blue')
+		axes[1].hist(self.RightBouts, bins=bins, color='orange')
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+	def PlotInterboutHistogram_Overlap(self, fname, bins=25):
+		fig,axes = pyplot.subplots(1)
+		fig.autofmt_xdate()
+		fig.suptitle("Interbout Histogram for %s" % fname)
+
+		colors = ['blue', 'orange']
+		axes.hist( [self.LeftInterbouts, self.RightInterbouts], bins=bins, color=colors, label=['Left', 'Right'])
+		axes.set_xlabel('Bins of Time (ms)')
+		axes.legend(loc='upper right')
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+	def PlotInterboutHistogram_SideBySide(self, fname, bins=25):
+		fig,axes = pyplot.subplots(1,2)
+		fig.autofmt_xdate()
+		fig.suptitle("Interbout Histogram for %s" % fname)
+
+		axes[0].set_xlabel('Left (Bins of Time (ms))')
+		axes[1].set_xlabel('Right (Bins of Time (ms))')
+		axes[0].hist(self.LeftInterbouts, bins=bins, color='blue')
+		axes[1].hist(self.RightInterbouts, bins=bins, color='orange')
 
 		# SAVE IT
 		fig.savefig(fname)
@@ -519,4 +576,8 @@ for fname in fnames:
 	o.PlotBoutRepetitions(fname + "-boutrepititions.png")
 	o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
 	o.PlotBoutBoxplot(fname + '-boxplot.png')
+	o.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
+	o.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
+	o.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
+	o.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
 
