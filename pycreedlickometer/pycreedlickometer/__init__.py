@@ -71,12 +71,6 @@ class CreedLickometer:
 		self.LeftCumulative = None
 		self.RightCumulative = None
 
-		# Define the boundaries of time
-		self.MinimumDatetime = None
-		self.MinimumMillseconds = None
-		self.MaximumDatetime = None
-		self.MaximumMillseconds = None
-
 	def Load(self):
 		"""
 		Load a CSV data file without processing
@@ -146,6 +140,9 @@ class CreedLickometer:
 
 	@staticmethod
 	def Merge(self, a, b):
+		"""
+		Merge two data files @a and @b and return a new CreedLickometer instance
+		"""
 		raise NotImplementedError
 
 	def Process(self):
@@ -153,6 +150,7 @@ class CreedLickometer:
 		Process the raw data in Lefts & Rights into the various parts.
 		"""
 
+		# Clear everything
 		self.LeftBouts = []
 		self.RightBouts = []
 
@@ -230,11 +228,15 @@ class CreedLickometer:
 		# Calculate all the stats
 		self.LeftBoutStats = StatBot(self.LeftBouts)
 		self.LeftInterboutStats = StatBot(self.LeftInterbouts)
-
 		self.RightBoutStats = StatBot(self.RightBouts)
 		self.RightInterboutStats = StatBot(self.RightInterbouts)
 
-	def PlotVsTime(self, fname):
+	def PlotVsTime(self, fname, minutes=1):
+		"""
+		Plot bouts against time. Bouts are grouped by the minute.
+		Set @minutes to something other than 1 to pre-group them into larger groups
+		"""
+
 		fig,axes = pyplot.subplots(2)
 
 		axes[0].set_ylabel("Left (# Bouts)")
@@ -242,26 +244,38 @@ class CreedLickometer:
 		axes[1].set_xlabel("Time (min)")
 		fig.autofmt_xdate()
 
+		if minutes != 1:
+			raise NotImplementedError("Minutes group not implemented yet")
+
 		start = self.Spandt[0]
 		end = self.Spandt[1]
 
+		# -------- LEFT --------
+		# Get all the datetime objects and sort them
 		keys = list(self.LeftVsTime.keys())
 		keys.sort()
 
+		# X data is datetime values
+		# Y data is bout counts per time
 		x = []
 		y = []
+		# Iterate over the whole time so that zeroes can be injected to plot nicely
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
 			dt = start + datetime.timedelta(minutes=minute)
 			x.append(dt)
 			if dt in keys:
 				y.append(len(self.LeftVsTime[dt]))
 			else:
+				# If there isn't a data point at this time, then there were zero bouts
 				y.append(0)
 
 		axes[0].plot(x, y)
 
+		# -------- RIGHT --------
+		# Should mirror left except by the use of RightVsTime instead
 		keys = list(self.RightVsTime.keys())
 		keys.sort()
+
 		x = []
 		y = []
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
@@ -273,9 +287,98 @@ class CreedLickometer:
 				y.append(0)
 		axes[1].plot(x, y)
 
+		# SAVE IT
 		fig.savefig(fname)
+		pyplot.close()
 
-	def PlotCumulative(self, fname):
+	def PlotBoutRepetitions(self, fname, minutes=1):
+		"""
+		Plot a cumulative bout count for each tube that is reset when the other tube is used.
+		"""
+
+		fig,axes = pyplot.subplots(2)
+
+		axes[0].set_ylabel("Left (# Bouts)")
+		axes[1].set_ylabel("Right (# Bouts)")
+		axes[1].set_xlabel("Time (min)")
+		fig.autofmt_xdate()
+
+		if minutes != 1:
+			raise NotImplementedError("Minutes group not implemented yet")
+
+		start = self.Spandt[0]
+		end = self.Spandt[1]
+
+		# -------- LEFT vs RIGHT --------
+		# Count number of left bouts that is reset when a right bout is encountered
+		# Get all the datetime objects and sort them
+		lkeys = list(self.LeftVsTime.keys())
+		lkeys.sort()
+		rkeys = list(self.RightVsTime.keys())
+		rkeys.sort()
+
+		# X data is datetime values
+		# Y data is bout counts per time
+		xl = []
+		yl = []
+		# Iterate over the whole time so that zeroes can be injected to plot nicely
+		cnt = 0
+		for minute in range(0, int((end-start).total_seconds()/60)+1):
+			dt = start + datetime.timedelta(minutes=minute)
+			xl.append(dt)
+			if dt in rkeys:
+				cnt = 0
+				yl.append(cnt)
+
+			elif dt in lkeys:
+				cnt += 1
+				yl.append(cnt)
+
+			else:
+				# If there isn't a data point at this time, then there were zero bouts
+				yl.append(cnt)
+
+
+		# -------- RIGHT vs LEFT --------
+		# Count number of right bouts that is reset when a left bout is encountered
+		# X data is datetime values
+		# Y data is bout counts per time
+		xr = []
+		yr = []
+		# Iterate over the whole time so that zeroes can be injected to plot nicely
+		cnt = 0
+		for minute in range(0, int((end-start).total_seconds()/60)+1):
+			dt = start + datetime.timedelta(minutes=minute)
+			xr.append(dt)
+			if dt in lkeys:
+				cnt = 0
+				yr.append(cnt)
+
+			elif dt in rkeys:
+				cnt += 1
+				yr.append(cnt)
+
+			else:
+				# If there isn't a data point at this time, then there were zero bouts
+				yr.append(cnt)
+
+		maxy = max(max(yl), max(yr))
+
+		axes[0].set_ylim(0,maxy)
+		axes[1].set_ylim(0,maxy)
+
+		axes[0].plot(xl, yl)
+		axes[1].plot(xr, yr)
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
+	def PlotCumulativeBoutTImes(self, fname):
+		"""
+		Plot cumulative bout times.
+		"""
+
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
 
@@ -292,7 +395,9 @@ class CreedLickometer:
 
 		axes.legend(loc="lower right")
 
+		# SAVE IT
 		fig.savefig(fname)
+		pyplot.close()
 
 def foo(fname, o):
 	if True:
@@ -357,5 +462,6 @@ for fname in fnames:
 	foo(fname, o)
 
 	o.PlotVsTime(fname + "-vstime.png")
-	o.PlotCumulative(fname + "-cumulative.png")
+	o.PlotBoutRepetitions(fname + "-boutrepititions.png")
+	o.PlotCumulativeBoutTImes(fname + "-cumulativebouttimes.png")
 
