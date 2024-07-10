@@ -77,6 +77,65 @@ class CreedLickometer:
 		self.IsLoaded = False
 		self.IsProcessed = False
 
+	def Save(self, fname=None):
+		"""
+		Save the data to CSV file.
+		Optional file name to save to (using this saves a copy and leaves self.Filename alone).
+		"""
+
+		rows = []
+		if not len(self.Rights) and not len(self.Lefts):
+			# No data to write
+			pass
+
+		elif not len(self.Rights):
+			for row in self.Lefts:
+				l = int(not row[2])
+				r = 1
+				rows.append( [row[0], row[1], self.DeviceID, l, r, 0.0] )
+		elif not len(self.Lefts):
+			for row in self.Rights:
+				l = 1
+				r = int(not row[2])
+				rows.append( [row[0], row[1], self.DeviceID, l, r, 0.0] )
+		else:
+			# Combine left and rights
+			combo = [[dt,ms,int(not beam),None] for dt,ms,beam,delta in self.Lefts]
+			combo +=[[dt,ms,None,int(not beam)] for dt,ms,beam,delta in self.Rights]
+			# Sort by milliseconds
+			combo.sort(key=lambda _:_[1])
+
+			l = 1
+			r = 1
+			for row in combo:
+				# Update left/right value depending on if it was set or not
+				if row[2] is not None:
+					l = row[2]
+				if row[3] is not None:
+					r = row[3]
+
+				rows.append((
+					row[0].strftime("%Y-%m-%d %H:%M:%S"),
+					row[1],
+					self.DeviceID,
+					l,
+					r,
+					0.0
+				))
+
+		header = ['YYYY-MM-DD hh:mm:ss', 'Millseconds', 'Device', 'LeftState', 'RightState', 'BatteryVoltage']
+
+		# Overwrite file
+		if fname is None:
+			fname = self.Filename
+
+		with open(fname, 'w') as f:
+			w = csv.writer(f)
+			w.writerow(header)
+
+			for row in rows:
+				w.writerow(row)
+
 	def Load(self):
 		"""
 		Load a CSV data file without processing
@@ -141,9 +200,41 @@ class CreedLickometer:
 		self.Rights = rights
 		self.IsLoaded = True
 
-	def TrimBefore(self, dt):
-		"""Trime all data before datetime @dt"""
-		raise NotImplementedError
+	def TrimBefore(self, truncate_dt):
+		"""
+		Trim all data before datetime @truncate_dt.
+		"""
+
+		if not self.IsLoaded:
+			self.Load()
+
+		# Pull out trimmed entries
+		lefts = []
+		rights = []
+
+		for dt,ms,beam,delta in self.Lefts:
+			if dt >= truncate_dt:
+				lefts.append( (dt,ms,beam,delta) )
+		for dt,ms,beam,delta in self.Rights:
+			if dt >= truncate_dt:
+				rights.append( (dt,ms,beam,delta) )
+
+		# Edge case of the truncation date being in the middle of a bout
+		# If it starts in the beam broken state ([2] == True) then exclude it
+		if lefts[0][2]:
+			del lefts[0]
+		if rights[0][2]:
+			del rights[0]
+
+		# Create new container for the data, assign it, and pretend it's loaded
+		o = CreedLickometer(None)
+		o.DeviceID = self.DeviceID
+		o.Lefts = lefts
+		o.Rights = rights
+		o.IsLoaded = True
+		o.IsMerged = True
+
+		return o
 
 	@staticmethod
 	def Merge(a, b):
@@ -677,7 +768,26 @@ def merger():
 	c.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
 	c.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
 
+def truncate():
+	fname = "../../test/7-1 Overnight Device 6.CSV"
+	a = CreedLickometer(fname)
+	b = a.TrimBefore(datetime.datetime(2024,7,3, 2,0,0))
+	b.Process()
+
+	b.Filename = "../../test/7-1 Overnight Device 6 truncated.CSV"
+	b.Save()
+
+	b.PlotVsTime(fname + "-vstime.png")
+	b.PlotBoutRepetitions(fname + "-boutrepititions.png")
+	b.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
+	b.PlotBoutBoxplot(fname + '-boxplot.png')
+	b.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
+	b.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
+	b.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
+	b.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
+
 if __name__ == '__main__':
 	#allfiles()
-	merger()
+	#merger()
+	truncate()
 
