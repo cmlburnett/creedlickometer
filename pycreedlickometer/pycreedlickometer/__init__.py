@@ -795,7 +795,7 @@ pyplot.rcParams["figure.autolayout"] = True
 pyplot.rcParams["xtick.labelsize"] = 'small'
 
 def allfiles():
-	fnames = [_ for _ in os.listdir("../../test/") if not _.startswith('.') and _.lower().endswith('.csv')]
+	fnames = [_ for _ in os.listdir("../../test/") if not _.startswith('.') and _.lower().endswith('.csv') and 'truncated' not in _]
 	fnames.sort()
 
 	for fname in fnames:
@@ -854,7 +854,7 @@ def truncate():
 	b.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
 
 if __name__ == '__main__':
-	#allfiles()
+	allfiles()
 	#merger()
-	truncate()
+	#truncate()
 
