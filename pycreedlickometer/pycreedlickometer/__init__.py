@@ -73,6 +73,10 @@ class CreedLickometer:
 		self.LeftCumulative = None
 		self.RightCumulative = None
 
+		self.IsMerged = False
+		self.IsLoaded = False
+		self.IsProcessed = False
+
 	def Load(self):
 		"""
 		Load a CSV data file without processing
@@ -135,17 +139,87 @@ class CreedLickometer:
 
 		self.Lefts = lefts
 		self.Rights = rights
+		self.IsLoaded = True
 
 	def TrimBefore(self, dt):
 		"""Trime all data before datetime @dt"""
 		raise NotImplementedError
 
 	@staticmethod
-	def Merge(self, a, b):
+	def Merge(a, b):
 		"""
 		Merge two data files @a and @b and return a new CreedLickometer instance
 		"""
-		raise NotImplementedError
+
+		# Ensure files are loaded
+		if not a.IsLoaded:
+			a.Load()
+		if not b.IsLoaded:
+			b.Load()
+
+		# Ensure files are processed (I'm lazy and don't want to calculate Spandt myself)
+		if not a.IsProcessed:
+			a.Process()
+		if not b.IsProcessed:
+			b.Process()
+
+		# Why would you merge files from different devices other than by accident?
+		if a.DeviceID != b.DeviceID:
+			raise ValueError("Merging files from two different devices (%d and %d)" % (a.DeviceID, b.DeviceID))
+
+		# Flip file order if wrong
+		if b.Spandt[0] >= a.Spandt[1]:
+			# a <= b is correctly ordered as expected
+			pass
+		elif a.Spandt[0] > b.Spandt[1]:
+			# b < a so swap them
+			a,b = b,a
+		else:
+			raise ValueError("Unrecognized ordering of files: a=%s, b=%s" % (a.Spandt, b.Spandt))
+
+		# Time gap between files
+		gap = b.Spandt[0] - a.Spandt[1]
+
+		# Not a halting error, just disregard data we can't finish processing
+		if a.Lefts[-1][2]:
+			print("First file (%s) left ends with beam broken, popping this off" % a.Filename)
+			a.Lefts.pop()
+		if b.Lefts[0][2]:
+			print("Second file (%s) left starts with a beam broken, dequeueing it" % b.Filename)
+			del b.Lefts[0]
+
+		if a.Rights[-1][2]:
+			print("First file (%s) right ends with beam broken, popping this off" % a.Filename)
+			a.Rights.pop()
+		if b.Rights[0][2]:
+			print("Second file (%s) right starts with a beam broken, dequeueing it" % b.Filename)
+			del b.Rights[0]
+
+		# Expected gap given gap in seconds
+		gapms = int(gap.total_seconds() * 1000 + 1000)
+		startms = gapms + a.Spanms[1]
+		deltams = startms - b.Spanms[0]
+
+		# Aggregate lefts & rights together
+		lefts = list(a.Lefts)
+		rights = list(a.Rights)
+
+		# Merge left & right data and adjust @b's milliseconds to account for the gap
+		# This ensures that millseconds is increasing across the merged data sets
+		for dt,ms,beam,delta in b.Lefts:
+			lefts.append( (dt,ms+deltams,beam,delta) )
+		for dt,ms,beam,delta in b.Rights:
+			rights.append( (dt,ms+deltams,beam,delta) )
+
+		# Create new container for the data, assign it, and pretend it's loaded
+		o = CreedLickometer(None)
+		o.Lefts = lefts
+		o.Rights = rights
+		o.IsLoaded = True
+		o.IsMerged = True
+		o.Process()
+
+		return o
 
 	def Process(self):
 		"""
@@ -232,6 +306,8 @@ class CreedLickometer:
 		self.LeftInterboutStats = StatBot(self.LeftInterbouts)
 		self.RightBoutStats = StatBot(self.RightBouts)
 		self.RightInterboutStats = StatBot(self.RightInterbouts)
+
+		self.IsProcessed = True
 
 	def PlotVsTime(self, fname, minutes=1):
 		"""
@@ -555,29 +631,53 @@ def printstats(fname, o):
 
 
 
-fnames = [_ for _ in os.listdir("../../test/") if not _.startswith('.') and _.lower().endswith('.csv')]
-fnames.sort()
 
 pyplot.rcParams["figure.figsize"] = [10.0, 4.0]
 pyplot.rcParams["figure.autolayout"] = True
 pyplot.rcParams["xtick.labelsize"] = 'small'
 
-for fname in fnames:
-	fname = '../../test/' + fname
-	print("\n\n")
-	print(fname)
-	o = CreedLickometer(fname)
-	o.Load()
-	o.Process()
+def allfiles():
+	fnames = [_ for _ in os.listdir("../../test/") if not _.startswith('.') and _.lower().endswith('.csv')]
+	fnames.sort()
 
-	printstats(fname, o)
+	for fname in fnames:
+		fname = '../../test/' + fname
+		print("\n\n")
+		print(fname)
+		o = CreedLickometer(fname)
+		o.Load()
+		o.Process()
 
-	o.PlotVsTime(fname + "-vstime.png")
-	o.PlotBoutRepetitions(fname + "-boutrepititions.png")
-	o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
-	o.PlotBoutBoxplot(fname + '-boxplot.png')
-	o.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
-	o.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
-	o.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
-	o.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
+		printstats(fname, o)
+
+		o.PlotVsTime(fname + "-vstime.png")
+		o.PlotBoutRepetitions(fname + "-boutrepititions.png")
+		o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
+		o.PlotBoutBoxplot(fname + '-boxplot.png')
+		o.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
+		o.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
+		o.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
+		o.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
+
+def merger():
+	fnames = ['../../test/7-1 Overnight Device 2 pt 1.CSV', '../../test/7-1 Overnight Device 2 pt 2.CSV']
+
+	a = CreedLickometer(fnames[0])
+	b = CreedLickometer(fnames[1])
+
+	fname = '../../test/7-1 Overnight Device 2 merged.CSV'
+	c = CreedLickometer.Merge(a,b)
+
+	c.PlotVsTime(fname + "-vstime.png")
+	c.PlotBoutRepetitions(fname + "-boutrepititions.png")
+	c.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
+	c.PlotBoutBoxplot(fname + '-boxplot.png')
+	c.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
+	c.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
+	c.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
+	c.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
+
+if __name__ == '__main__':
+	#allfiles()
+	merger()
 
