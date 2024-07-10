@@ -81,6 +81,7 @@ class CreedLickometer:
 		"""
 		Save the data to CSV file.
 		Optional file name to save to (using this saves a copy and leaves self.Filename alone).
+		Battery voltage data is discarded, so update original data files at your own peril.
 		"""
 
 		rows = []
@@ -88,16 +89,20 @@ class CreedLickometer:
 			# No data to write
 			pass
 
+		# No rights, just lefts
 		elif not len(self.Rights):
 			for row in self.Lefts:
 				l = int(not row[2])
 				r = 1
 				rows.append( [row[0], row[1], self.DeviceID, l, r, 0.0] )
+
+		# No lefts, only rights
 		elif not len(self.Lefts):
 			for row in self.Rights:
 				l = 1
 				r = int(not row[2])
 				rows.append( [row[0], row[1], self.DeviceID, l, r, 0.0] )
+
 		else:
 			# Combine left and rights
 			combo = [[dt,ms,int(not beam),None] for dt,ms,beam,delta in self.Lefts]
@@ -105,6 +110,7 @@ class CreedLickometer:
 			# Sort by milliseconds
 			combo.sort(key=lambda _:_[1])
 
+			# Keep track of last left/right values to copy on rows in which it doesn't change
 			l = 1
 			r = 1
 			for row in combo:
@@ -225,6 +231,42 @@ class CreedLickometer:
 			del lefts[0]
 		if rights[0][2]:
 			del rights[0]
+
+		# Create new container for the data, assign it, and pretend it's loaded
+		o = CreedLickometer(None)
+		o.DeviceID = self.DeviceID
+		o.Lefts = lefts
+		o.Rights = rights
+		o.IsLoaded = True
+		o.IsMerged = True
+
+		return o
+
+	def TrimAfter(self, truncate_dt):
+		"""
+		Trim all data after datetime @truncate_dt.
+		"""
+
+		if not self.IsLoaded:
+			self.Load()
+
+		# Pull out trimmed entries
+		lefts = []
+		rights = []
+
+		for dt,ms,beam,delta in self.Lefts:
+			if dt <= truncate_dt:
+				lefts.append( (dt,ms,beam,delta) )
+		for dt,ms,beam,delta in self.Rights:
+			if dt <= truncate_dt:
+				rights.append( (dt,ms,beam,delta) )
+
+		# Edge case of the truncation date being in the middle of a bout
+		# If it starts in the beam broken state ([2] == True) then exclude it
+		if lefts[-1][2]:
+			lefts.pop()
+		if rights[-1][2]:
+			rights.pop()
 
 		# Create new container for the data, assign it, and pretend it's loaded
 		o = CreedLickometer(None)
@@ -578,6 +620,11 @@ class CreedLickometer:
 		pyplot.close()
 
 	def PlotBoutBoxplot(self, fname, limitextremes=True):
+		"""
+		Plot bouts as a box plot.
+		@limitextremes, if True, then the ultra extreme outliers are chopped off by fixing the y-axis limits.
+		"""
+
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
 		fig.suptitle("Box Plot for %s" % fname)
@@ -622,6 +669,11 @@ class CreedLickometer:
 		pyplot.close()
 
 	def PlotBoutHistogram_Overlap(self, fname, bins=25):
+		"""
+		Plot bouts as a histogram with @bins of data.
+		Left and right data plots are shown on the same axes (overlapping).
+		"""
+
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
 		fig.suptitle("Bout Histogram for %s" % fname)
@@ -636,6 +688,11 @@ class CreedLickometer:
 		pyplot.close()
 
 	def PlotBoutHistogram_SideBySide(self, fname, bins=25):
+		"""
+		Plot bouts as a histogram with @bins of data.
+		Left and right data plots are shown side-by-side as separate plots.
+		"""
+
 		fig,axes = pyplot.subplots(1,2)
 		fig.autofmt_xdate()
 		fig.suptitle("Bout Histogram for %s" % fname)
@@ -650,6 +707,11 @@ class CreedLickometer:
 		pyplot.close()
 
 	def PlotInterboutHistogram_Overlap(self, fname, bins=25):
+		"""
+		Plot interbouts as a histogram with @bins of data.
+		Left and right data plots are shown on the same axes (overlapping).
+		"""
+
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
 		fig.suptitle("Interbout Histogram for %s" % fname)
@@ -664,6 +726,11 @@ class CreedLickometer:
 		pyplot.close()
 
 	def PlotInterboutHistogram_SideBySide(self, fname, bins=25):
+		"""
+		Plot interbouts as a histogram with @bins of data.
+		Left and right data plots are shown side-by-side as separate plots.
+		"""
+
 		fig,axes = pyplot.subplots(1,2)
 		fig.autofmt_xdate()
 		fig.suptitle("Interbout Histogram for %s" % fname)
