@@ -8,4 +8,12 @@ and code dated 5-31-2022 from:
 
 https://hackaday.io/project/160388-automated-mouse-homecage-two-bottle-choice-test-v2
 
+-------------------
+
+pycreedlickometer is a python library that parses the modified sipper output files and use matplotlib to generate numerous plots.
+
+Install:
+	cd pycreedlickometer
+	python3 -m build
+	sudo pip3 install dist/pycreedlickometer-1.0.tar.gz
 
