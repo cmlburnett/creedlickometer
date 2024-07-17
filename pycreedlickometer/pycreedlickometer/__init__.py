@@ -1,6 +1,11 @@
 import csv
 import datetime
+import itertools
 import os
+
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
 from matplotlib import pyplot
 import matplotlib
@@ -753,3 +758,90 @@ class CreedLickometer:
 		fig.savefig(fname)
 		pyplot.close()
 
+	@staticmethod
+	def PlotStatsTable(fname, *objs):
+		wb = Workbook()
+		ws = wb.active
+		ws.title = "Stats"
+
+		# Section labels
+		ws['A1'] = 'Bouts'
+		ws['A23'] = 'Interbouts'
+
+		# Same row headers for bouts and interbouts
+		header = ['N', 'Sum', 'Min', 'Max', 'Mean', 'Q25', 'Q50', 'Q75', 'IQR']
+
+		# Put in device IDs as columns for each section
+		for pos in ([2,5], [24,5]): # E2 and E24
+			for obj in objs:
+				ws.cell(pos[0],pos[1]+0).value = obj.DeviceID
+				pos[1] += 1
+
+		# Make headers for each section
+		for pos in ([3,2], [25,2]): #B3 and B25
+			for h in header:
+				# Header info
+				ws.cell(pos[0]+0, pos[1]).value = h
+				ws.cell(pos[0]+0, pos[1]+1).value = 'Left'
+				ws.cell(pos[0]+1, pos[1]+1).value = 'Right'
+
+				col_a = get_column_letter(pos[1]+2+1)
+				col_b = get_column_letter(pos[1]+2+1 + len(objs)-1)
+
+				#ws.cell(pos[0]+0, pos[1]+2).value = '=ttest(%s%d:%s%d, %s%d:%s%d, 2,1)' % (col_a,pos[0]+0, col_b,pos[0]+0, col_a,pos[0]+1, col_b,pos[0]+1)
+
+				pos[0] += 2
+
+		# Inject data
+		for cnt,obj in enumerate(objs):
+			# Increment row for each object
+			pos = [3,5+cnt] # E3
+
+			idx = 0
+
+			left = obj.LeftBoutStats
+			right = obj.RightBoutStats
+
+			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			for attr in attrs:
+				l = getattr(left, attr)
+				r = getattr(right, attr)
+
+				if attr in possnull:
+					ws.cell(pos[0]+idx+0, pos[1]).value = l or ""
+					ws.cell(pos[0]+idx+1, pos[1]).value = r or ""
+				else:
+					ws.cell(pos[0]+idx+0, pos[1]).value = l
+					ws.cell(pos[0]+idx+1, pos[1]).value = r
+				idx += 2
+
+		# Inject data
+		for cnt,obj in enumerate(objs):
+			# Increment row for each object
+			pos = [25,5+cnt] # E3
+
+			idx = 0
+
+			left = obj.LeftInterboutStats
+			right = obj.RightInterboutStats
+
+			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			for attr in attrs:
+				l = getattr(left, attr)
+				r = getattr(right, attr)
+
+				if attr in possnull:
+					ws.cell(pos[0]+idx+0, pos[1]).value = l or ""
+					ws.cell(pos[0]+idx+1, pos[1]).value = r or ""
+				else:
+					ws.cell(pos[0]+idx+0, pos[1]).value = l
+					ws.cell(pos[0]+idx+1, pos[1]).value = r
+				idx += 2
+
+		try:
+			os.unlink(fname)
+		except:
+			pass
+		wb.save(fname)
