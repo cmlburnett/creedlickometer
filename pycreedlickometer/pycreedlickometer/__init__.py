@@ -79,6 +79,9 @@ class CreedLickometer:
 		self.IsLoaded = False
 		self.IsProcessed = False
 
+	def __repr__(self):
+		return "<%s device=%s file=%s>" % (self.__class__.__name__, self.DeviceID, self.Filename)
+
 	def Save(self, fname=None):
 		"""
 		Save the data to CSV file.
