@@ -351,6 +351,7 @@ class CreedLickometer:
 
 		# Create new container for the data, assign it, and pretend it's loaded
 		o = CreedLickometer(None)
+		o.DeviceID = a.DeviceID
 		o.Lefts = lefts
 		o.Rights = rights
 		o.IsLoaded = True
