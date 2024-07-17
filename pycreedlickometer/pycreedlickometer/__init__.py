@@ -157,13 +157,16 @@ class CreedLickometer:
 
 		with open(self.Filename, 'r') as f:
 			r = csv.reader(f)
-			header = None
 			for row in r:
-				if header is None:
-					header = r
+				# Header row, disregard
+				if row[0].startswith("YYYY"):
 					continue
 
-				dt = datetime.datetime.strptime(row[0], '%m/%d/%Y %H:%M')
+				try:
+					dt = datetime.datetime.strptime(row[0], '%m/%d/%Y %H:%M')
+				except ValueError:
+					dt = datetime.datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S')
+
 				ms = int(row[1])
 				self.DeviceID = int(row[2])
 				left = int(row[3])
