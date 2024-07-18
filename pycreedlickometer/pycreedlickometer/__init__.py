@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 from matplotlib import pyplot
 import matplotlib
 
+import pandas as pd
 import numpy as np
 
 __all__ = ['StatBot', 'CreedLickometer', 'VolumeData']
@@ -131,6 +132,13 @@ class TimeData:
 			raise ValueError("TimeData has a gap")
 
 		self.IsProcessed = True
+
+	def GetTime(self, dt):
+		for start,end,phase in self.cycles:
+			if start <= dt and dt < end:
+				return phase
+		else:
+			raise ValueError("Found time %s not in time data, which shouldn't happen" % str(dt))
 
 class VolumeData:
 	"""
@@ -633,6 +641,7 @@ class CreedLickometer:
 		# Processing performed in two passes
 		#  1) Crunch data into "slices" where for second pass.
 		#  2) Crunch volume data into cumulative volume data
+		#  3) Crunch light-dark cycle information
 
 		def firstpass(entries, vstime, cumulative, bouts, interbouts):
 			allslices = []
@@ -718,11 +727,36 @@ class CreedLickometer:
 
 			return (t1,t2)
 
+		def thirdpass(lf_idx, allslices):
+			if self.DeviceID != 1:
+				return
+
+			lights = []
+			darks = []
+
+			for idx in range(len(allslices)):
+				slices = allslices[idx]
+
+				for dt,delta,t,voldat in slices:
+					ret = self.TimeData.GetTime(dt.time())
+					if ret == 'light':
+						lights.append( (dt,delta,t,voldat) )
+					elif ret == 'dark':
+						darks.append( (dt,delta,t,voldat) )
+					else:
+						raise ValueError("Unknown light-dark phase for time %s: %d" % (str(dt),ret))
+
+			print(lights)
+			print(darks)
+
 		left_t,left_allslices = firstpass(self.Lefts, self.LeftVsTime, self.LeftCumulative, self.LeftBouts, self.LeftInterbouts)
 		right_t,right_allslices = firstpass(self.Rights, self.RightVsTime, self.RightCumulative, self.RightBouts, self.RightInterbouts)
 
 		left_c_vol,left_ct_vol = secondpass(0, left_allslices, self.LeftCumulativeVolume, self.LeftCumulativeTotalVolume)
 		right_c_vol,right_ct_vol = secondpass(1, right_allslices, self.RightCumulativeVolume, self.RightCumulativeTotalVolume)
+
+		thirdpass(0, left_allslices)
+		#thirdpass(1, right_allslices)
 
 		# Not the most efficient way but easy to write
 		mindt = min(map(lambda _:_[0], self.Lefts + self.Rights))
@@ -967,7 +1001,6 @@ class CreedLickometer:
 		# SAVE IT
 		fig.savefig(fname)
 		pyplot.close()
-
 
 	def PlotBoutBoxplot(self, fname, limitextremes=True):
 		"""
