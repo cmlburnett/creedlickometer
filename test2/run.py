@@ -5,7 +5,7 @@ import re
 import subprocess
 
 from matplotlib import pyplot
-from pycreedlickometer import CreedLickometer
+from pycreedlickometer import CreedLickometer, VolumeData, TimeData
 
 
 def printstats(o):
@@ -78,52 +78,44 @@ def fnameparse(fname):
 
 def allfiles():
 	# Volume data to include
-	volumes = [
-		{
-			'date': datetime.datetime(2024,7,15, 13,35),
-			'volumes': {
-				1: [13.0,  13.0],
-				3: [12.0,  13.5],
-				5: [13.0,  13.0],
-				6: [13.75, 12.5],
-				7: [13.5,  13.5],
-				8: [13.5,  13.5],
-				9: [13.0,  13.0],
-				12:[13.5,  13.0],
-			},
-			'refill': None,
-		},
-		{
-			'date': datetime.datetime(2024,7,16, 11,00),
-			'volumes': {
-				1: [11.5,  11.0],
-				3: [9.75,  11.75],
-				5: [9.5,   12.5],
-				6: [13.0,  10.0],
-				7: [12.0,  12.5],
-				8: [11.5,  12.5],
-				9: [11.75, 10.5],
-				12:[13.0,  8.5],
-			},
-			'refill': None,
-		},
-		{
-			'date': datetime.datetime(2024,7,17, 11,00),
-			'volumes': {
-				1: [9.5,  10.5],
-				3: [7.5,  10.5],
-				5: [6.25, 12.5],
-				6: [10.5, 8.5],
-				7: [10.0, 12.5],
-				8: [8.5,  12.5],
-				9: [9.5,  10.0],
-				12:[13.0, 3.0],
-			},
-			'refill': {
-				12: [None, 13.75],
-			},
-		},
-	]
+	v = VolumeData()
+	dt = datetime.datetime(2024,7,15, 13,35)
+	v.AddFill(dt, 1, 13.0, 13.0)
+	v.AddFill(dt, 3, 12.0, 13.5)
+	v.AddFill(dt, 5, 13.0, 13.0)
+	v.AddFill(dt, 6, 13.75, 12.5)
+	v.AddFill(dt, 7, 13.5, 13.5)
+	v.AddFill(dt, 8, 13.5, 13.5)
+	v.AddFill(dt, 9, 13.0, 13.0)
+	v.AddFill(dt, 12,13.5, 13.0)
+
+	dt = datetime.datetime(2024,7,16, 11,00)
+	v.AddMeasurement(dt, 1, 11.5, 11.0)
+	v.AddMeasurement(dt, 3, 9.75, 11.75)
+	v.AddMeasurement(dt, 5, 9.5, 12.5)
+	v.AddMeasurement(dt, 6, 13.0, 10.0)
+	v.AddMeasurement(dt, 7, 12.0, 12.5)
+	v.AddMeasurement(dt, 8, 11.5, 12.5)
+	v.AddMeasurement(dt, 9, 11.75, 10.5)
+	v.AddMeasurement(dt, 12,13.0, 8.5)
+
+	dt = datetime.datetime(2024,7,17, 11,00)
+	v.AddMeasurement(dt, 1, 9.5, 10.5)
+	v.AddMeasurement(dt, 3, 7.5, 10.5)
+	v.AddMeasurement(dt, 5, 6.25, 12.5)
+	v.AddMeasurement(dt, 6, 10.5, 8.5)
+	v.AddMeasurement(dt, 7, 10.0, 12.5)
+	v.AddMeasurement(dt, 8, 8.5, 12.5)
+	v.AddMeasurement(dt, 9, 9.5, 10.0)
+	v.AddMeasurement(dt, 12,13.0, 3.0)
+	v.AddFill(dt, 12, None, 13.75)
+
+	# Add light/dark cycle information
+	tz = TimeData()
+	tz.AddLightPhase( datetime.time(5,0,0), datetime.time(19,0,0) )
+	tz.AddDarkPhase( datetime.time(19,0,0), datetime.time(5,0,0) )
+	tz.Process()
+
 
 	fnames = [_ for _ in os.listdir("./data/") if not _.startswith('.') and _.lower().endswith('.csv') and 'truncated' not in _]
 	fnames.sort()
@@ -150,6 +142,8 @@ def allfiles():
 		for f in files:
 			print("", f)
 			o = CreedLickometer('./data/' + f['filename'])
+			o.AddVolumeData(v)
+			o.AddTimeData(tz)
 			data[dev].append(o)
 
 		# Get min/max dates for merged file names
@@ -172,7 +166,6 @@ def allfiles():
 		print("\n\n")
 		print(o.Filename)
 		o.Process()
-		continue
 
 		#printstats(o)
 
@@ -181,19 +174,19 @@ def allfiles():
 		o.PlotVsTime(fname + "-vstime.png")
 		o.PlotBoutRepetitions(fname + "-boutrepititions.png")
 		o.PlotCumulativeBoutTimes(fname + "-cumulativebouttimes.png")
+		o.PlotCumulativeNormalizedVolume(fname + "-cumulativevolume.png")
 		o.PlotBoutBoxplot(fname + '-boxplot.png')
 		o.PlotBoutHistogram_Overlap(fname + '-bouthisto-overlap.png')
 		o.PlotBoutHistogram_SideBySide(fname + '-bouthisto-sidebyside.png')
 		o.PlotInterboutHistogram_Overlap(fname + '-interbouthisto-overlap.png')
 		o.PlotInterboutHistogram_SideBySide(fname + '-interbouthisto-sidebyside.png')
 
-	if False:
-		# Combine all plots together vertically (-append rather than +append)
-		plots = ['vstime.png', 'boutrepititions.png', 'cumulativebouttimes.png', 'boxplot.png', 'bouthisto-overlap.png', 'bouthisto-sidebyside.png', 'interbouthisto-overlap.png', 'interbouthisto-sidebyside.png']
-		for plot in plots:
-			args = ['convert'] + ['%s-%s' % (_,plot)  for _ in fnames] + ['-append', plot]
-			print(args)
-			subprocess.run(args)
+	# Combine all plots together vertically (-append rather than +append)
+	plots = ['vstime.png', 'boutrepititions.png', 'cumulativebouttimes.png', 'cumulativevolume.png', 'boxplot.png', 'bouthisto-overlap.png', 'bouthisto-sidebyside.png', 'interbouthisto-overlap.png', 'interbouthisto-sidebyside.png']
+	for plot in plots:
+		args = ['convert'] + ['%s-%s' % (_,plot)  for _ in fnames] + ['-append', plot]
+		print(args)
+		subprocess.run(args)
 
 	# Combine stats into a table
 	CreedLickometer.PlotStatsTable('stats.xlsx', *merged)

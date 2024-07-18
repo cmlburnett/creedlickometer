@@ -1,5 +1,6 @@
 import csv
 import datetime
+import functools
 import itertools
 import os
 
@@ -12,7 +13,7 @@ import matplotlib
 
 import numpy as np
 
-__all__ = ['StatBot', 'CreedLickometer']
+__all__ = ['StatBot', 'CreedLickometer', 'VolumeData']
 
 class StatBot:
 	"""
@@ -47,9 +48,163 @@ class StatBot:
 			self.Quartile75 = q[2]
 			self.IQR = q[2]-q[0]
 
+class TimeData:
+	"""
+	Manages light & dark cycles.
+	This ensures the full 24 hours is covered with a phase of the cycle.
+	"""
+	def __init__(self):
+		self.cycles = []
+		self.IsComplete = False
+		self.IsProcessed = False
+
+	def AddLightPhase(self, start, end):
+		"""
+		Add a light phase from @start to @end.
+		If @end is before start then it is considered to have spanned midnight and wraps around.
+		"""
+		if start == end:
+			raise ValueError("Start and end are the same time: %s" % start)
+
+		if start < end:
+			self.cycles.append( (start,end, 'light') )
+		else:
+			self.cycles.append( (datetime.time.min, end, 'light') )
+			self.cycles.append( (start, datetime.time.max, 'light') )
+
+		self._Process()
+
+	def AddDarkPhase(self, start, end):
+		"""
+		Add a dark phase from @start to @end.
+		If @end is before start then it is considered to have spanned midnight and wraps around.
+		"""
+		if start == end:
+			raise ValueError("Start and end are the same time: %s" % start)
+
+		if start < end:
+			self.cycles.append( (start,end, 'dark') )
+		else:
+			self.cycles.append( (datetime.time.min, end, 'dark') )
+			self.cycles.append( (start, datetime.time.max, 'dark') )
+
+		self._Process()
+
+	def _Process(self):
+		"""
+		Internal process to sort and check if complete
+		"""
+		self.IsComplete = False
+		self.IsProcessed = False
+
+		if not len(self.cycles):
+			return
+
+		self.cycles.sort()
+
+		if self.cycles[0][0] != datetime.time.min:
+			return
+		if self.cycles[-1][1] != datetime.time.max:
+			return
+
+		# Find if any gaps between parts
+		for idx in range(1,len(self.cycles)):
+			if self.cycles[idx-1][1] != self.cycles[idx][0]:
+				break
+
+		# If it made it through then it's complete
+		self.IsComplete = True
+
+	def Process(self):
+		"""
+		Called by the user to formally check midnight and complete clock coverage with Exceptions thrown if not.
+		"""
+
+		self._Process()
+
+		if self.cycles[0][0] != datetime.time.min:
+			raise ValueError("TimeData does not start at midnight")
+		if self.cycles[-1][1] != datetime.time.max:
+			raise ValueError("TimeData does not end at midnight")
+
+		if not self.IsComplete:
+			raise ValueError("TimeData has a gap")
+
+		self.IsProcessed = True
+
+class VolumeData:
+	def __init__(self):
+		# Tuples of (datetime, code, device ID, left, right)
+		# code is just 'm' or 'f' for measure or fill
+		self.measured = []
+		self.fill = []
+		self.process = []
+
+	def AddMeasurement(self, dt, device, left, right):
+		self.measured.append( (dt, 'm', device, left, right) )
+		self._Process()
+
+	def AddFill(self, dt, device, left, right):
+		self.fill.append( (dt + datetime.timedelta(microseconds=1), 'f', device, left, right) )
+		self._Process()
+
+	def _Process(self):
+		"""
+		Process the entries and collapse measured/fill data.
+		"""
+
+		self.measured.sort(key=lambda _:_[0])
+		self.fill.sort(key=lambda _:_[0])
+
+		self.process.clear()
+		self.process += self.measured
+		self.process += self.fill
+		self.process.sort()
+
+	def GetVolume(self, dt, device):
+		"""
+		Get volume information on device @device at the time @dt.
+		"""
+
+		if not len(self.measured):
+			raise ValueError("No volume data")
+
+		# Exclude all other devices
+		filtered = [_ for _ in self.process if _[2] == device]
+
+		# Find bound entires of the time
+		for idx,entry in enumerate(filtered):
+			if dt < entry[0]:
+				if idx == 0:
+					raise ValueError("Time requested (%s) is before all available data, cannot give a volume" % dt)
+				else:
+					pre = filtered[idx-1]
+					post = entry
+
+					return {
+						# Pre and post (datetime, left, right)
+						'pre': (pre[0], pre[3], pre[4]),
+						'post': (post[0], post[3], post[4]),
+						# Change in time and volumes of this time span
+						'delta': (post[0]-pre[0], pre[3]-post[3], pre[4]-post[4])
+					}
+			else:
+				# Haven't bounded yet, loop again
+				pass
+		else:
+			# After last entry
+			raise ValueError("Time requested (%s) is after all available data, cannot give a volume" % dt)
+
+
 class CreedLickometer:
 	def __init__(self, fname):
 		self.Filename = fname
+
+		# No volume data by default
+		self.VolumeData = None
+
+		# No time cycle data by default
+		self.TimeData = None
 
 		# Integer of the programmed device ID
 		self.DeviceID = None
@@ -80,9 +235,38 @@ class CreedLickometer:
 		self.LeftCumulative = None
 		self.RightCumulative = None
 
+		# Cumulative volume data (for each measured/fill phase)
+		self.LeftCumulativeVolume = None
+		self.RightCumulativeVolume = None
+
+		# Cumulative volume data (total)
+		self.LeftCumulativeTotalVolume = None
+		self.RightCumulativeTotalVolume = None
+
 		self.IsMerged = False
 		self.IsLoaded = False
 		self.IsProcessed = False
+
+	def AddTimeData(self, tz):
+		"""
+		Time data provides light/dark cycle information.
+		"""
+		self.TimeData = tz
+
+		# Force that it's checked
+		if tz.IsProcessed:
+			tz.Process()
+
+	def AddVolumeData(self, volume):
+		"""
+		Volume data provides fill and measured data for some plots.
+		If no volume data is provided, then those plots aren't generated.
+		"""
+		self.VolumeData = volume
+
+		# Reprocess if volume data is set
+		if self.IsProcessed:
+			self.Process()
 
 	def __repr__(self):
 		return "<%s device=%s file=%s>" % (self.__class__.__name__, self.DeviceID, self.Filename)
@@ -248,6 +432,8 @@ class CreedLickometer:
 		# Create new container for the data, assign it, and pretend it's loaded
 		o = CreedLickometer(None)
 		o.DeviceID = self.DeviceID
+		o.VolumeData = self.VolumeData
+		o.TimeData = self.TimeData
 		o.Lefts = lefts
 		o.Rights = rights
 		o.IsLoaded = True
@@ -284,6 +470,8 @@ class CreedLickometer:
 		# Create new container for the data, assign it, and pretend it's loaded
 		o = CreedLickometer(None)
 		o.DeviceID = self.DeviceID
+		o.VolumeData = self.VolumeData
+		o.TimeData = self.TimeData
 		o.Lefts = lefts
 		o.Rights = rights
 		o.IsLoaded = True
@@ -312,6 +500,17 @@ class CreedLickometer:
 		# Why would you merge files from different devices other than by accident?
 		if a.DeviceID != b.DeviceID:
 			raise ValueError("Merging files from two different devices (%d and %d)" % (a.DeviceID, b.DeviceID))
+
+		if a.VolumeData is None and b.VolumeData is None:
+			pass
+		elif a.VolumeData is not None and b.VolumeData is not None:
+			if id(a.VolumeData) != id(b.VolumeData):
+				raise ValueError("Merging two sets of data with different volume data")
+			else:
+				# Same object, so move on
+				pass
+		else:
+			raise ValueError("Merging two sets of data but one does not have volume data and the other does")
 
 		# Flip file order if wrong
 		if b.Spandt[0] >= a.Spandt[1]:
@@ -360,6 +559,7 @@ class CreedLickometer:
 		# Create new container for the data, assign it, and pretend it's loaded
 		o = CreedLickometer(None)
 		o.DeviceID = a.DeviceID
+		o.VolumeData = a.VolumeData
 		o.Lefts = lefts
 		o.Rights = rights
 		o.IsLoaded = True
@@ -386,45 +586,101 @@ class CreedLickometer:
 		self.LeftCumulative = []
 		self.RightCumulative = []
 
-		# Process Bout, Interbout, VsTimes and Cumulative data
-		left_t = 0.0
-		right_t = 0.0
-		for dt,ms,beam,delta in self.Lefts:
-			if delta is None: continue
+		self.LeftCumulativeVolume = []
+		self.RightCumulativeVolume = []
 
-			# Make sure both start at time zero
-			if not len(self.LeftCumulative):
-				self.LeftCumulative.append( (dt,left_t) )
+		self.LeftCumulativeTotalVolume = []
+		self.RightCumulativeTotalVolume = []
 
-			if beam == True:
-				self.LeftInterbouts.append(delta)
-				self.LeftCumulative.append( (dt,left_t) )
-			else:
-				self.LeftBouts.append(delta)
+		def firstpass(entries, vstime, cumulative, bouts, interbouts):
+			allslices = []
+			slices = []
+			allslices.append(slices)
 
-				left_t += delta
-				self.LeftCumulative.append( (dt,left_t) )
-				if dt not in self.LeftVsTime:
-					self.LeftVsTime[dt] = []
-				self.LeftVsTime[dt].append(delta)
+			# Keep track of when the date changes
+			previous_dt = None
 
-		for dt,ms,beam,delta in self.Rights:
-			if delta is None: continue
+			t = 0.0
+			for dt,ms,beam,delta in entries:
+				if delta is None: continue
 
-			if not len(self.RightCumulative):
-				self.RightCumulative.append( (dt,right_t) )
+				# Make sure both start at time zero
+				if not len(cumulative):
+					cumulative.append( (dt,t) )
 
-			if beam == True:
-				self.RightInterbouts.append(delta)
-				self.RightCumulative.append( (dt,right_t) )
-			else:
-				self.RightBouts.append(delta)
+				if beam == True:
+					interbouts.append(delta)
+					cumulative.append( (dt,t) )
+				else:
+					bouts.append(delta)
 
-				right_t += delta
-				self.RightCumulative.append( (dt,right_t) )
-				if dt not in self.RightVsTime:
-					self.RightVsTime[dt] = []
-				self.RightVsTime[dt].append(delta)
+					t += delta
+					cumulative.append( (dt,t) )
+					if dt not in vstime:
+						vstime[dt] = []
+					vstime[dt].append(delta)
+
+					try:
+						ret = self.VolumeData.GetVolume(dt, self.DeviceID)
+						if previous_dt is None:
+							previous_dt = ret['pre'][0]
+						if ret['pre'][0] != previous_dt:
+							slices = []
+							allslices.append(slices)
+							previous_dt = ret['pre'][0]
+						slices.append( (dt,delta,t,ret) )
+
+					except ValueError as e:
+						print(e)
+						continue
+
+			return (t,allslices)
+
+		def secondpass(lr_idx, allslices, cumulative_volumes, cumulative_total_volumes):
+			data_1 = 0.0
+
+			t1 = 0.0
+			t2 = 0.0
+			for idx in range(len(allslices)):
+				slices = allslices[idx]
+
+				last_val = 0.0
+				if idx != 0:
+					last_val = allslices[idx-1][-1][2]
+
+				if not len(slices):
+					continue
+
+				for dt,delta,t,voldat in slices:
+					vol = voldat['delta'][lr_idx+1]
+
+					if not len(cumulative_volumes):
+						cumulative_volumes.append( (dt, 0.0) )
+					if not len(cumulative_total_volumes):
+						cumulative_total_volumes.append( (dt, 0.0) )
+
+					# Because @t is cumulative, have to subtract from numerator AND denominator
+					t1 = vol_cumulative = (t-last_val)*vol / (slices[-1][2]-last_val)
+
+					t2 = vol_total_cumulative = vol_cumulative + data_1
+
+					z = datetime.timedelta(milliseconds=delta)
+					cumulative_volumes.append( (dt-z, cumulative_volumes[-1][1]) )
+					cumulative_volumes.append( (dt, vol_cumulative) )
+
+					cumulative_total_volumes.append( (dt-z, cumulative_total_volumes[-1][1]) )
+					cumulative_total_volumes.append( (dt, vol_total_cumulative) )
+
+				# Save this last one so it can be added into vol_total_cumulative for next slices block
+				data_1 = vol_cumulative
+
+			return (t1,t2)
+
+		left_t,left_allslices = firstpass(self.Lefts, self.LeftVsTime, self.LeftCumulative, self.LeftBouts, self.LeftInterbouts)
+		right_t,right_allslices = firstpass(self.Rights, self.RightVsTime, self.RightCumulative, self.RightBouts, self.RightInterbouts)
+
+		left_c_vol,left_ct_vol = secondpass(0, left_allslices, self.LeftCumulativeVolume, self.LeftCumulativeTotalVolume)
+		right_c_vol,right_ct_vol = secondpass(1, right_allslices, self.RightCumulativeVolume, self.RightCumulativeTotalVolume)
 
 		# Not the most efficient way but easy to write
 		mindt = min(map(lambda _:_[0], self.Lefts + self.Rights))
@@ -441,6 +697,16 @@ class CreedLickometer:
 		self.LeftCumulative.append( (maxdt, left_t) )
 		self.RightCumulative.insert(0, (mindt, 0.0) )
 		self.RightCumulative.append( (maxdt, right_t) )
+
+		self.LeftCumulativeVolume.insert(0, (mindt, 0.0) )
+		self.LeftCumulativeVolume.append( (maxdt, left_c_vol) )
+		self.RightCumulativeVolume.insert(0, (mindt, 0.0) )
+		self.RightCumulativeVolume.append( (maxdt, right_c_vol) )
+
+		self.LeftCumulativeTotalVolume.insert(0, (mindt, 0.0) )
+		self.LeftCumulativeTotalVolume.append( (maxdt, left_ct_vol) )
+		self.RightCumulativeTotalVolume.insert(0, (mindt, 0.0) )
+		self.RightCumulativeTotalVolume.append( (maxdt, right_ct_vol) )
 
 		# Sort the data
 		self.LeftBouts.sort()
@@ -617,14 +883,15 @@ class CreedLickometer:
 		fig.suptitle("Cumulative Bout Times for %s" % fname)
 
 		axes.set_xlabel("Time (ms)")
-		axes.set_ylabel("Cumulative Time (min)")
+		axes.set_ylabel("Cumulative Time (sec)")
+		# Data is in milliseconds, so divide each point by 1000.0 to get seconds
 
 		x = [_[0] for _ in self.LeftCumulative]
-		y = [_[1] for _ in self.LeftCumulative]
+		y = [_[1]/1000.0 for _ in self.LeftCumulative]
 		axes.plot(x,y, 'r', label="Left")
 
 		x = [_[0] for _ in self.RightCumulative]
-		y = [_[1] for _ in self.RightCumulative]
+		y = [_[1]/1000.0 for _ in self.RightCumulative]
 		axes.plot(x,y, 'b', label="Right")
 
 		axes.legend(loc="lower right")
@@ -632,6 +899,33 @@ class CreedLickometer:
 		# SAVE IT
 		fig.savefig(fname)
 		pyplot.close()
+
+	def PlotCumulativeNormalizedVolume(self, fname):
+		"""
+		Plot cumulative volume times normalized to recorded volume over the day.
+		"""
+
+		fig,axes = pyplot.subplots(1)
+		fig.autofmt_xdate()
+		fig.suptitle("Cumulative Normalized Volume for %s" % fname)
+
+		axes.set_xlabel("Time (ms)")
+		axes.set_ylabel("Cumulative Volume (mL)")
+
+		x = [_[0] for _ in self.LeftCumulativeTotalVolume]
+		y = [_[1] for _ in self.LeftCumulativeTotalVolume]
+		axes.plot(x,y, 'r', label="Left")
+
+		x = [_[0] for _ in self.RightCumulativeTotalVolume]
+		y = [_[1] for _ in self.RightCumulativeTotalVolume]
+		axes.plot(x,y, 'b', label="Right")
+
+		axes.legend(loc="lower right")
+
+		# SAVE IT
+		fig.savefig(fname)
+		pyplot.close()
+
 
 	def PlotBoutBoxplot(self, fname, limitextremes=True):
 		"""
