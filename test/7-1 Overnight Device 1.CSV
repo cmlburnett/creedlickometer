@@ -1,4 +1,4 @@
-, Millseconds, Device, LeftState, RightState, BatteryVoltage,,,
+YYYY-MM-SS, Millseconds, Device, LeftState, RightState, BatteryVoltage,,,
 7/2/2024 14:15,10688206,1,0,0,3.78,,,299
 7/2/2024 14:15,10688614,1,1,1,3.78,,,
 7/3/2024 1:13,10704989,1,1,0,3.76,470,,

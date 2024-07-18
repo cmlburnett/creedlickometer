@@ -638,6 +638,19 @@ class CreedLickometer:
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
 
+
+		if False:
+			def topandas(entries):
+				bouts = []
+				for dt,ms,beam,delta in entries:
+					print([dt,ms,beam,delta])
+
+			lefts = topandas(self.Lefts)
+
+			left = pd.DataFrame(data, columns=['start_dt','end_dt','start_ms','end_ms','delta'])
+			print(left)
+			raise ValueError
+
 		# Processing performed in two passes
 		#  1) Crunch data into "slices" where for second pass.
 		#  2) Crunch volume data into cumulative volume data
@@ -1001,6 +1014,16 @@ class CreedLickometer:
 		# SAVE IT
 		fig.savefig(fname)
 		pyplot.close()
+
+		with open(fname + '-left.csv', 'w', newline='') as f:
+			w = csv.writer(f)
+			for dt,val in self.LeftCumulativeTotalVolume:
+				w.writerow([dt,val])
+
+		with open(fname + '-right.csv', 'w', newline='') as f:
+			w = csv.writer(f)
+			for dt,val in self.RightCumulativeTotalVolume:
+				w.writerow([dt,val])
 
 	def PlotBoutBoxplot(self, fname, limitextremes=True):
 		"""
