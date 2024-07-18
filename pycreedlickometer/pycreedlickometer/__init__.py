@@ -133,6 +133,14 @@ class TimeData:
 		self.IsProcessed = True
 
 class VolumeData:
+	"""
+	Manages volume data.
+	Data can come in the form of measured data or fill data.
+	Fill data should be AFTER meausred data (gotta have second point to determine velocity).
+
+	Accepted for measured and fill data to be at the same time, so a 1 microsecond delta is added to the measured time
+	 so that fill comes second when sorting.
+	"""
 	def __init__(self):
 		# Tuples of (datetime, code, device ID, left, right)
 		# code is just 'm' or 'f' for measure or fill
@@ -141,15 +149,24 @@ class VolumeData:
 		self.process = []
 
 	def AddMeasurement(self, dt, device, left, right):
+		"""
+		Add a measurement value at time @dt for device @device for the left and right tubes.
+		Left and right to be assumed to be milliliters.
+		"""
 		self.measured.append( (dt, 'm', device, left, right) )
 		self._Process()
 
 	def AddFill(self, dt, device, left, right):
+		"""
+		Add a fill value at time @dt for device @device for the left and right tubes.
+		Left and right to be assumed to be milliliters.
+		"""
 		self.fill.append( (dt + datetime.timedelta(microseconds=1), 'f', device, left, right) )
 		self._Process()
 
 	def _Process(self):
 		"""
+		Internal function called with every addition of data.
 		Process the entries and collapse measured/fill data.
 		"""
 
@@ -164,6 +181,8 @@ class VolumeData:
 	def GetVolume(self, dt, device):
 		"""
 		Get volume information on device @device at the time @dt.
+		Returns a dictionary of pre, post, and delta data.
+		All three return values are 3-tuples of (date, left, right) data.
 		"""
 
 		if not len(self.measured):
@@ -194,7 +213,6 @@ class VolumeData:
 		else:
 			# After last entry
 			raise ValueError("Time requested (%s) is after all available data, cannot give a volume" % dt)
-
 
 class CreedLickometer:
 	def __init__(self, fname):
@@ -501,6 +519,7 @@ class CreedLickometer:
 		if a.DeviceID != b.DeviceID:
 			raise ValueError("Merging files from two different devices (%d and %d)" % (a.DeviceID, b.DeviceID))
 
+		# Ensure same volume data for both data sets
 		if a.VolumeData is None and b.VolumeData is None:
 			pass
 		elif a.VolumeData is not None and b.VolumeData is not None:
@@ -511,6 +530,21 @@ class CreedLickometer:
 				pass
 		else:
 			raise ValueError("Merging two sets of data but one does not have volume data and the other does")
+
+		# Ensure same volume data for both data sets
+		if a.TimeData is None and b.TimeData is None:
+			pass
+		elif a.TimeData is not None and b.TimeData is not None:
+			if id(a.TimeData) != id(b.TimeData):
+				raise ValueError("Merging two sets of data with different time data")
+			else:
+				# Same object, so move on
+				pass
+		else:
+			raise ValueError("Merging two sets of data but one does not have time data and the other does")
+
+		# -----------------------------------------------------------------------------------------
+		# -----------------------------------------------------------------------------------------
 
 		# Flip file order if wrong
 		if b.Spandt[0] >= a.Spandt[1]:
@@ -540,6 +574,9 @@ class CreedLickometer:
 			print("Second file (%s) right starts with a beam broken, dequeueing it" % b.Filename)
 			del b.Rights[0]
 
+		# -----------------------------------------------------------------------------------------
+		# -----------------------------------------------------------------------------------------
+
 		# Expected gap given gap in seconds
 		gapms = int(gap.total_seconds() * 1000 + 1000)
 		startms = gapms + a.Spanms[1]
@@ -560,6 +597,7 @@ class CreedLickometer:
 		o = CreedLickometer(None)
 		o.DeviceID = a.DeviceID
 		o.VolumeData = a.VolumeData
+		o.TimeData = a.TimeData
 		o.Lefts = lefts
 		o.Rights = rights
 		o.IsLoaded = True
@@ -570,7 +608,7 @@ class CreedLickometer:
 
 	def Process(self):
 		"""
-		Process the raw data in Lefts & Rights into the various parts.
+		Process the raw data in Lefts & Rights into the various parts and data.
 		"""
 
 		# Clear everything
@@ -591,6 +629,10 @@ class CreedLickometer:
 
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
+
+		# Processing performed in two passes
+		#  1) Crunch data into "slices" where for second pass.
+		#  2) Crunch volume data into cumulative volume data
 
 		def firstpass(entries, vstime, cumulative, bouts, interbouts):
 			allslices = []
