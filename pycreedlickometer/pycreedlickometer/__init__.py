@@ -283,10 +283,6 @@ class CreedLickometer:
 		self.LeftCumulative = None
 		self.RightCumulative = None
 
-		# Cumulative volume data (for each measured/fill phase)
-		self.LeftCumulativeVolume = None
-		self.RightCumulativeVolume = None
-
 		# Cumulative volume data (total)
 		self.LeftCumulativeTotalVolume = None
 		self.RightCumulativeTotalVolume = None
@@ -642,9 +638,10 @@ class CreedLickometer:
 
 		return o
 
-	def Process(self):
+	def Process(self, rawdata_fname=None):
 		"""
 		Process the raw data in Lefts & Rights into the various parts and data.
+		Pass in a file name via @rawdata_fname to save raw processed data to a file (well, two files one for left and one for right).
 		"""
 
 		# Clear everything
@@ -659,9 +656,6 @@ class CreedLickometer:
 
 		self.LeftCumulative = []
 		self.RightCumulative = []
-
-		self.LeftCumulativeVolume = []
-		self.RightCumulativeVolume = []
 
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
@@ -813,165 +807,54 @@ class CreedLickometer:
 
 			right = o(right, right_volume_cdf)
 
-		if False:
-			# Processing performed in two passes
-			#  1) Crunch data into "slices" where for second pass.
-			#  2) Crunch volume data into cumulative volume data
-			#  3) Crunch light-dark cycle information
-
-			def firstpass(entries, vstime, cumulative, bouts, interbouts):
-				allslices = []
-				slices = []
-				allslices.append(slices)
-
-				# Keep track of when the date changes
-				previous_dt = None
-
-				t = 0.0
-				for dt,ms,beam,delta in entries:
-					if delta is None: continue
-
-					# Make sure both start at time zero
-					if not len(cumulative):
-						cumulative.append( (dt,t) )
-
-					if beam == True:
-						interbouts.append(delta)
-						cumulative.append( (dt,t) )
-					else:
-						bouts.append(delta)
-
-						t += delta
-						cumulative.append( (dt,t) )
-						if dt not in vstime:
-							vstime[dt] = []
-						vstime[dt].append(delta)
-
-						try:
-							ret = self.VolumeData.GetVolume(dt, self.DeviceID)
-							if previous_dt is None:
-								previous_dt = ret['pre'][0]
-							if ret['pre'][0] != previous_dt:
-								slices = []
-								allslices.append(slices)
-								previous_dt = ret['pre'][0]
-							slices.append( (dt,delta,t,ret) )
-
-						except ValueError as e:
-							print(e)
-							continue
-
-				return (t,allslices)
-
-			def secondpass(lr_idx, allslices, cumulative_volumes, cumulative_total_volumes):
-				data_1 = 0.0
-
-				t1 = 0.0
-				t2 = 0.0
-				for idx in range(len(allslices)):
-					slices = allslices[idx]
-
-					last_val = 0.0
-					if idx != 0:
-						last_val = allslices[idx-1][-1][2]
-
-					if not len(slices):
-						continue
-
-					for dt,delta,t,voldat in slices:
-						vol = voldat['delta'][lr_idx+1]
-
-						if not len(cumulative_volumes):
-							cumulative_volumes.append( (dt, 0.0) )
-						if not len(cumulative_total_volumes):
-							cumulative_total_volumes.append( (dt, 0.0) )
-
-						# Because @t is cumulative, have to subtract from numerator AND denominator
-						t1 = vol_cumulative = (t-last_val)*vol / (slices[-1][2]-last_val)
-
-						t2 = vol_total_cumulative = vol_cumulative + data_1
-
-						z = datetime.timedelta(milliseconds=delta)
-						cumulative_volumes.append( (dt-z, cumulative_volumes[-1][1]) )
-						cumulative_volumes.append( (dt, vol_cumulative) )
-
-						cumulative_total_volumes.append( (dt-z, cumulative_total_volumes[-1][1]) )
-						cumulative_total_volumes.append( (dt, vol_total_cumulative) )
-
-					# Save this last one so it can be added into vol_total_cumulative for next slices block
-					data_1 = vol_cumulative
-
-				return (t1,t2)
-
-			def thirdpass(lf_idx, allslices):
-				if self.DeviceID != 1:
-					return
-
-				lights = []
-				darks = []
-
-				for idx in range(len(allslices)):
-					slices = allslices[idx]
-
-					for dt,delta,t,voldat in slices:
-						ret = self.TimeData.GetTime(dt.time())
-						if ret == 'light':
-							lights.append( (dt,delta,t,voldat) )
-						elif ret == 'dark':
-							darks.append( (dt,delta,t,voldat) )
-						else:
-							raise ValueError("Unknown light-dark phase for time %s: %d" % (str(dt),ret))
-
-				print(lights)
-				print(darks)
-
-			left_t,left_allslices = firstpass(self.Lefts, self.LeftVsTime, self.LeftCumulative, self.LeftBouts, self.LeftInterbouts)
-			right_t,right_allslices = firstpass(self.Rights, self.RightVsTime, self.RightCumulative, self.RightBouts, self.RightInterbouts)
-
-			left_c_vol,left_ct_vol = secondpass(0, left_allslices, self.LeftCumulativeVolume, self.LeftCumulativeTotalVolume)
-			right_c_vol,right_ct_vol = secondpass(1, right_allslices, self.RightCumulativeVolume, self.RightCumulativeTotalVolume)
-
-			thirdpass(0, left_allslices)
-			#thirdpass(1, right_allslices)
-
-			# Not the most efficient way but easy to write
-			mindt = min(map(lambda _:_[0], self.Lefts + self.Rights))
-			maxdt = max(map(lambda _:_[0], self.Lefts + self.Rights))
-			minms = min(map(lambda _:_[1], self.Lefts + self.Rights))
-			maxms = max(map(lambda _:_[1], self.Lefts + self.Rights))
-
 		# Set the spans of the time data
 		self.Spandt = (mindt, maxdt)
 		self.Spanms = (minms, maxms)
 
-		if False:
-			# Ensure start and end are the same
-			self.LeftCumulative.insert(0, (mindt, 0.0) )
-			self.LeftCumulative.append( (maxdt, left_t) )
-			self.RightCumulative.insert(0, (mindt, 0.0) )
-			self.RightCumulative.append( (maxdt, right_t) )
+		# Save if file name is provided
+		if rawdata_fname:
+			fname = '%s-left.csv' % os.path.splitext(rawdata_fname)[0]
+			left.to_csv(fname)
 
-			self.LeftCumulativeVolume.insert(0, (mindt, 0.0) )
-			self.LeftCumulativeVolume.append( (maxdt, left_c_vol) )
-			self.RightCumulativeVolume.insert(0, (mindt, 0.0) )
-			self.RightCumulativeVolume.append( (maxdt, right_c_vol) )
+			fname = '%s-right.csv' % os.path.splitext(rawdata_fname)[0]
+			right.to_csv(fname)
 
-			self.LeftCumulativeTotalVolume.insert(0, (mindt, 0.0) )
-			self.LeftCumulativeTotalVolume.append( (maxdt, left_ct_vol) )
-			self.RightCumulativeTotalVolume.insert(0, (mindt, 0.0) )
-			self.RightCumulativeTotalVolume.append( (maxdt, right_ct_vol) )
+		def genplotdata(data, vstime, cumulative, cumulativetotalvolume, bouts, interbouts):
+			# Generate vstime data rounded to the minute
+			for idx,row in data.iterrows():
+				dt = row['start_dt'].replace(second=0, microsecond=0)
+				if dt not in vstime:
+					vstime[dt] = []
+				vstime[dt].append(row['delta'])
 
-			# Sort the data
-			self.LeftBouts.sort()
-			self.LeftInterbouts.sort()
-			self.RightBouts.sort()
-			self.RightInterbouts.sort()
+			# Generate bout and interbout data
+			prior = None
+			for idx,row in data.iterrows():
+				#bouts.append( (row['start_dt'], row['delta']) )
+				bouts.append(row['delta'])
 
-			# Calculate all the stats
-			self.LeftBoutStats = StatBot(self.LeftBouts)
-			self.LeftInterboutStats = StatBot(self.LeftInterbouts)
-			self.RightBoutStats = StatBot(self.RightBouts)
-			self.RightInterboutStats = StatBot(self.RightInterbouts)
+				if prior is None:
+					prior = row['end_dt']
+				else:
+					#interbout = (row['start_dt'] - prior).total_seconds()
+					interbout = (row['start_dt'] - prior).total_seconds()
+					interbouts.append(interbout)
+					prior = row['end_dt']
+
+			for idx,row in data.iterrows():
+				cumulative.append( (row['start_dt'], row['delta_total_cdf']) )
+				cumulativetotalvolume.append( (row['start_dt'], row['cumulative_total_volume']) )
+
+		if len(left):
+			genplotdata(left, self.LeftVsTime, self.LeftCumulative, self.LeftCumulativeTotalVolume, self.LeftBouts, self.LeftInterbouts)
+		if len(right):
+			genplotdata(right, self.RightVsTime, self.RightCumulative, self.RightCumulativeTotalVolume, self.RightBouts, self.RightInterbouts)
+
+		# Calculate all the stats
+		self.LeftBoutStats = StatBot(self.LeftBouts)
+		self.LeftInterboutStats = StatBot(self.LeftInterbouts)
+		self.RightBoutStats = StatBot(self.RightBouts)
+		self.RightInterboutStats = StatBot(self.RightInterbouts)
 
 		self.IsProcessed = True
 
@@ -1004,9 +887,10 @@ class CreedLickometer:
 		# Y data is bout counts per time
 		xl = []
 		yl = []
+		startzero = start.replace(second=0,microsecond=0)
 		# Iterate over the whole time so that zeroes can be injected to plot nicely
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
-			dt = start + datetime.timedelta(minutes=minute)
+			dt = startzero + datetime.timedelta(minutes=minute)
 			xl.append(dt)
 			if dt in keys:
 				yl.append(len(self.LeftVsTime[dt]))
@@ -1023,7 +907,7 @@ class CreedLickometer:
 		xr = []
 		yr = []
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
-			dt = start + datetime.timedelta(minutes=minute)
+			dt = startzero + datetime.timedelta(minutes=minute)
 			xr.append(dt)
 			if dt in keys:
 				yr.append(len(self.RightVsTime[dt]))
@@ -1032,8 +916,13 @@ class CreedLickometer:
 
 		# Want y-axis on both to match
 		maxy = max(max(yl), max(yr))
-		axes[0].set_ylim(0,maxy)
-		axes[1].set_ylim(0,maxy)
+		if maxy == 0:
+			# If no data, then set a non-zero maximum y value (otherwise matplotlib complains)
+			axes[0].set_ylim(0,1)
+			axes[1].set_ylim(0,1)
+		else:
+			axes[0].set_ylim(0,maxy)
+			axes[1].set_ylim(0,maxy)
 
 		axes[0].plot(xl, yl)
 		axes[1].plot(xr, yr)
@@ -1075,8 +964,9 @@ class CreedLickometer:
 		yl = []
 		# Iterate over the whole time so that zeroes can be injected to plot nicely
 		cnt = 0
+		startzero = start.replace(second=0, microsecond=0)
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
-			dt = start + datetime.timedelta(minutes=minute)
+			dt = startzero + datetime.timedelta(minutes=minute)
 			xl.append(dt)
 			if dt in rkeys:
 				cnt = 0
@@ -1100,7 +990,7 @@ class CreedLickometer:
 		# Iterate over the whole time so that zeroes can be injected to plot nicely
 		cnt = 0
 		for minute in range(0, int((end-start).total_seconds()/60)+1):
-			dt = start + datetime.timedelta(minutes=minute)
+			dt = startzero + datetime.timedelta(minutes=minute)
 			xr.append(dt)
 			if dt in lkeys:
 				cnt = 0
@@ -1116,8 +1006,13 @@ class CreedLickometer:
 
 		# Want y-axis on both to match
 		maxy = max(max(yl), max(yr))
-		axes[0].set_ylim(0,maxy)
-		axes[1].set_ylim(0,maxy)
+		if maxy == 0:
+			# If no data, then set a non-zero maximum y value (otherwise matplotlib complains)
+			axes[0].set_ylim(0,1)
+			axes[1].set_ylim(0,1)
+		else:
+			axes[0].set_ylim(0,maxy)
+			axes[1].set_ylim(0,maxy)
 
 		axes[0].plot(xl, yl)
 		axes[1].plot(xr, yr)
@@ -1139,13 +1034,32 @@ class CreedLickometer:
 		axes.set_ylabel("Cumulative Time (sec)")
 		# Data is in milliseconds, so divide each point by 1000.0 to get seconds
 
-		x = [_[0] for _ in self.LeftCumulative]
-		y = [_[1]/1000.0 for _ in self.LeftCumulative]
-		axes.plot(x,y, 'r', label="Left")
 
-		x = [_[0] for _ in self.RightCumulative]
-		y = [_[1]/1000.0 for _ in self.RightCumulative]
-		axes.plot(x,y, 'b', label="Right")
+		xl = [_[0] for _ in self.LeftCumulative]
+		yl = [_[1]/1000.0 for _ in self.LeftCumulative]
+
+		xr = [_[0] for _ in self.RightCumulative]
+		yr = [_[1]/1000.0 for _ in self.RightCumulative]
+
+		# Ensure both start and end at the same x point
+		xmin = min(min(xl),min(xr))
+		xmax = max(max(xl),max(xr))
+		if xl[0] != xmin:
+			xl.insert(0, xmin)
+			yl.insert(0, 0.0)
+		if xr[0] != xmin:
+			xr.insert(0, xmin)
+			yr.insert(0, 0.0)
+
+		if xl[-1] != xmax:
+			xl.append(xmax)
+			yl.append(yl[-1])
+		if xr[-1] != xmax:
+			xr.append(xmax)
+			yr.append(yr[-1])
+
+		axes.plot(xl,yl, 'r', label="Left")
+		axes.plot(xr,yr, 'b', label="Right")
 
 		axes.legend(loc="lower right")
 
@@ -1165,13 +1079,31 @@ class CreedLickometer:
 		axes.set_xlabel("Time (ms)")
 		axes.set_ylabel("Cumulative Volume (mL)")
 
-		x = [_[0] for _ in self.LeftCumulativeTotalVolume]
-		y = [_[1] for _ in self.LeftCumulativeTotalVolume]
-		axes.plot(x,y, 'r', label="Left")
+		xl = [_[0] for _ in self.LeftCumulativeTotalVolume]
+		yl = [_[1] for _ in self.LeftCumulativeTotalVolume]
 
-		x = [_[0] for _ in self.RightCumulativeTotalVolume]
-		y = [_[1] for _ in self.RightCumulativeTotalVolume]
-		axes.plot(x,y, 'b', label="Right")
+		xr = [_[0] for _ in self.RightCumulativeTotalVolume]
+		yr = [_[1] for _ in self.RightCumulativeTotalVolume]
+
+		# Ensure both start and end at the same x point
+		xmin = min(min(xl),min(xr))
+		xmax = max(max(xl),max(xr))
+		if xl[0] != xmin:
+			xl.insert(0, xmin)
+			yl.insert(0, 0.0)
+		if xr[0] != xmin:
+			xr.insert(0, xmin)
+			yr.insert(0, 0.0)
+
+		if xl[-1] != xmax:
+			xl.append(xmax)
+			yl.append(yl[-1])
+		if xr[-1] != xmax:
+			xr.append(xmax)
+			yr.append(yr[-1])
+
+		axes.plot(xl,yl, 'r', label="Left")
+		axes.plot(xr,yr, 'b', label="Right")
 
 		axes.legend(loc="lower right")
 

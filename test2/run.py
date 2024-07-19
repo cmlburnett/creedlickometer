@@ -189,8 +189,7 @@ def allfiles():
 	for o in merged:
 		print("\n\n")
 		print(o.Filename)
-		o.Process()
-		raise ValueError
+		o.Process(o.Filename)
 
 		#printstats(o)
 
