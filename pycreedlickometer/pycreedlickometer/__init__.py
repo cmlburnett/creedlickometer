@@ -134,6 +134,13 @@ class TimeData:
 		self.IsProcessed = True
 
 	def GetTime(self, dt):
+		if isinstance(dt, datetime.datetime):
+			dt = dt.time()
+		elif isinstance(dt, datetime.time):
+			pass
+		else:
+			raise TypeError("Expect datetime or time object, got %d instead" % str(dt))
+
 		for start,end,phase in self.cycles:
 			if start <= dt and dt < end:
 				return phase
@@ -209,6 +216,8 @@ class VolumeData:
 					post = entry
 
 					return {
+						# This should be a unique index per device but is meaningless to compare before/after adding data
+						'index': idx,
 						# Pre and post (datetime, left, right)
 						'pre': (pre[0], pre[3], pre[4]),
 						'post': (post[0], post[3], post[4]),
@@ -554,6 +563,12 @@ class CreedLickometer:
 		# -----------------------------------------------------------------------------------------
 		# -----------------------------------------------------------------------------------------
 
+		# No data, so no need to merge
+		if a.Spandt[0] is None:
+			return b
+		elif b.Spandt[0] is None:
+			return a
+
 		# Flip file order if wrong
 		if b.Spandt[0] >= a.Spandt[1]:
 			# a <= b is correctly ordered as expected
@@ -638,176 +653,277 @@ class CreedLickometer:
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
 
-
-		if False:
-			def topandas(entries):
-				bouts = []
-				for dt,ms,beam,delta in entries:
-					print([dt,ms,beam,delta])
-
-			lefts = topandas(self.Lefts)
-
-			left = pd.DataFrame(data, columns=['start_dt','end_dt','start_ms','end_ms','delta'])
-			print(left)
-			raise ValueError
-
-		# Processing performed in two passes
-		#  1) Crunch data into "slices" where for second pass.
-		#  2) Crunch volume data into cumulative volume data
-		#  3) Crunch light-dark cycle information
-
-		def firstpass(entries, vstime, cumulative, bouts, interbouts):
-			allslices = []
-			slices = []
-			allslices.append(slices)
-
-			# Keep track of when the date changes
-			previous_dt = None
-
-			t = 0.0
-			for dt,ms,beam,delta in entries:
-				if delta is None: continue
-
-				# Make sure both start at time zero
-				if not len(cumulative):
-					cumulative.append( (dt,t) )
-
-				if beam == True:
-					interbouts.append(delta)
-					cumulative.append( (dt,t) )
-				else:
-					bouts.append(delta)
-
-					t += delta
-					cumulative.append( (dt,t) )
-					if dt not in vstime:
-						vstime[dt] = []
-					vstime[dt].append(delta)
-
-					try:
-						ret = self.VolumeData.GetVolume(dt, self.DeviceID)
-						if previous_dt is None:
-							previous_dt = ret['pre'][0]
-						if ret['pre'][0] != previous_dt:
-							slices = []
-							allslices.append(slices)
-							previous_dt = ret['pre'][0]
-						slices.append( (dt,delta,t,ret) )
-
-					except ValueError as e:
-						print(e)
+		def topandas(lr_idx, entries, volume_pdf):
+			bouts = []
+			for idx,row in enumerate(entries):
+				dt,ms,beam,delta = row
+				if not beam:
+					priorrow = entries[idx-1]
+					# Shouldn't compare
+					if not priorrow[2]:
 						continue
 
-			return (t,allslices)
+					try:
+						voldat = self.VolumeData.GetVolume(dt, self.DeviceID)
+					except ValueError as e:
+						print([dt,e])
+						continue
+					lightdat = self.TimeData.GetTime(dt)
 
-		def secondpass(lr_idx, allslices, cumulative_volumes, cumulative_total_volumes):
-			data_1 = 0.0
+					if voldat['index'] not in volume_pdf:
+						volume_pdf[ voldat['index'] ] = voldat['delta'][1+lr_idx]
 
-			t1 = 0.0
-			t2 = 0.0
-			for idx in range(len(allslices)):
-				slices = allslices[idx]
+					bouts.append({
+						'start_dt': priorrow[0],
+						'start_ms': priorrow[1],
+						'end_dt': dt,
+						'end_ms': ms,
+						'delta': ms - priorrow[1],
+						'volume': voldat['delta'][1+lr_idx],
+						'volume_index': voldat['index'],
+						'light': lightdat == 'light',
+					})
+			return pd.DataFrame(bouts)
 
-				last_val = 0.0
-				if idx != 0:
-					last_val = allslices[idx-1][-1][2]
+		# Map the volume_index to volume as a "pdf" then cumulative sum those values to make a "cdf"
+		# This can be added to the cumulative_volume at each row to get cumulative_total_volume
+		left_volume_pdf = {}
+		left_volume_cdf = {}
+		right_volume_pdf = {}
+		right_volume_cdf = {}
 
-				if not len(slices):
-					continue
+		left = topandas(0, self.Lefts, left_volume_pdf)
+		right = topandas(1, self.Rights, right_volume_pdf)
 
-				for dt,delta,t,voldat in slices:
-					vol = voldat['delta'][lr_idx+1]
+		# Calculate volume CDF's
+		c = 0.0
+		for k in left_volume_pdf.keys():
+			left_volume_cdf[k] = c
+			c += left_volume_pdf[k]
 
-					if not len(cumulative_volumes):
-						cumulative_volumes.append( (dt, 0.0) )
-					if not len(cumulative_total_volumes):
-						cumulative_total_volumes.append( (dt, 0.0) )
+		c = 0.0
+		for k in right_volume_pdf.keys():
+			right_volume_cdf[k] = c
+			c += right_volume_pdf[k]
 
-					# Because @t is cumulative, have to subtract from numerator AND denominator
-					t1 = vol_cumulative = (t-last_val)*vol / (slices[-1][2]-last_val)
+		# Assume an empty file
+		mindt = maxdt = minms = maxms = None
 
-					t2 = vol_total_cumulative = vol_cumulative + data_1
+		if len(left):
+			mindt = left['start_dt'].min()
+			maxdt = left['end_dt'].max()
+			minms = left['start_ms'].min()
+			maxms = left['end_ms'].max()
 
-					z = datetime.timedelta(milliseconds=delta)
-					cumulative_volumes.append( (dt-z, cumulative_volumes[-1][1]) )
-					cumulative_volumes.append( (dt, vol_cumulative) )
+			w = left.groupby('volume_index')
 
-					cumulative_total_volumes.append( (dt-z, cumulative_total_volumes[-1][1]) )
-					cumulative_total_volumes.append( (dt, vol_total_cumulative) )
+			# Calculate the cumulative sum of the delta (this sums the delta for the entire series)
+			left['delta_total_cdf'] = left['delta'].cumsum()
+			# Best way I found to do this is to copy the volume index first, them map that column using the CDF data generated
+			left['volume_cumulative_base'] = left['volume_index']
+			left['volume_cumulative_base'] = left['volume_cumulative_base'].map(left_volume_cdf.get)
 
-				# Save this last one so it can be added into vol_total_cumulative for next slices block
-				data_1 = vol_cumulative
+			# Create new columns of data ultimately to get cumulative_volume and cumulative_total_volume
+			def f(g):
+				g['delta_cdf'] = g['delta'].cumsum()
+				g['vol_delta_cdf'] = g['delta_cdf'] * g['volume']
+				g['cumulative_volume'] = g['vol_delta_cdf'] / g['delta'].sum()
+				g['cumulative_total_volume'] = g['cumulative_volume'] + g['volume_cumulative_base']
+				return g
 
-			return (t1,t2)
+			x = left.groupby("volume_index").apply(f)
+			print(x)
 
-		def thirdpass(lf_idx, allslices):
-			if self.DeviceID != 1:
-				return
+		if len(right):
+			if len(left):
+				mindt = min(mindt, right['start_dt'].min())
+				maxdt = max(maxdt, right['end_dt'].max())
+				minms = min(minms, right['start_ms'].min())
+				maxms = max(maxms, right['end_ms'].max())
+			else:
+				mindt = right['start_dt'].min()
+				maxdt = right['end_dt'].max()
+				minms = right['start_ms'].min()
+				maxms = right['end_ms'].max()
 
-			lights = []
-			darks = []
+			w = right.groupby('volume_index')
 
-			for idx in range(len(allslices)):
-				slices = allslices[idx]
+			# Calculate the cumulative sum of the delta (this sums the delta for the entire series)
+			right['delta_total_cdf'] = right['delta'].cumsum()
+			# Best way I found to do this is to copy the volume index first, them map that column using the CDF data generated
+			right['volume_cumulative_base'] = right['volume_index']
+			right['volume_cumulative_base'] = right['volume_cumulative_base'].map(right_volume_cdf.get)
 
-				for dt,delta,t,voldat in slices:
-					ret = self.TimeData.GetTime(dt.time())
-					if ret == 'light':
-						lights.append( (dt,delta,t,voldat) )
-					elif ret == 'dark':
-						darks.append( (dt,delta,t,voldat) )
+			# Create new columns of data ultimately to get cumulative_volume and cumulative_total_volume
+			def f(g):
+				g['delta_cdf'] = g['delta'].cumsum()
+				g['vol_delta_cdf'] = g['delta_cdf'] * g['volume']
+				g['cumulative_volume'] = g['vol_delta_cdf'] / g['delta'].sum()
+				g['cumulative_total_volume'] = g['cumulative_volume'] + g['volume_cumulative_base']
+				return g
+
+			x = right.groupby("volume_index").apply(f)
+			print(x)
+
+		if False:
+			# Processing performed in two passes
+			#  1) Crunch data into "slices" where for second pass.
+			#  2) Crunch volume data into cumulative volume data
+			#  3) Crunch light-dark cycle information
+
+			def firstpass(entries, vstime, cumulative, bouts, interbouts):
+				allslices = []
+				slices = []
+				allslices.append(slices)
+
+				# Keep track of when the date changes
+				previous_dt = None
+
+				t = 0.0
+				for dt,ms,beam,delta in entries:
+					if delta is None: continue
+
+					# Make sure both start at time zero
+					if not len(cumulative):
+						cumulative.append( (dt,t) )
+
+					if beam == True:
+						interbouts.append(delta)
+						cumulative.append( (dt,t) )
 					else:
-						raise ValueError("Unknown light-dark phase for time %s: %d" % (str(dt),ret))
+						bouts.append(delta)
 
-			print(lights)
-			print(darks)
+						t += delta
+						cumulative.append( (dt,t) )
+						if dt not in vstime:
+							vstime[dt] = []
+						vstime[dt].append(delta)
 
-		left_t,left_allslices = firstpass(self.Lefts, self.LeftVsTime, self.LeftCumulative, self.LeftBouts, self.LeftInterbouts)
-		right_t,right_allslices = firstpass(self.Rights, self.RightVsTime, self.RightCumulative, self.RightBouts, self.RightInterbouts)
+						try:
+							ret = self.VolumeData.GetVolume(dt, self.DeviceID)
+							if previous_dt is None:
+								previous_dt = ret['pre'][0]
+							if ret['pre'][0] != previous_dt:
+								slices = []
+								allslices.append(slices)
+								previous_dt = ret['pre'][0]
+							slices.append( (dt,delta,t,ret) )
 
-		left_c_vol,left_ct_vol = secondpass(0, left_allslices, self.LeftCumulativeVolume, self.LeftCumulativeTotalVolume)
-		right_c_vol,right_ct_vol = secondpass(1, right_allslices, self.RightCumulativeVolume, self.RightCumulativeTotalVolume)
+						except ValueError as e:
+							print(e)
+							continue
 
-		thirdpass(0, left_allslices)
-		#thirdpass(1, right_allslices)
+				return (t,allslices)
 
-		# Not the most efficient way but easy to write
-		mindt = min(map(lambda _:_[0], self.Lefts + self.Rights))
-		maxdt = max(map(lambda _:_[0], self.Lefts + self.Rights))
-		minms = min(map(lambda _:_[1], self.Lefts + self.Rights))
-		maxms = max(map(lambda _:_[1], self.Lefts + self.Rights))
+			def secondpass(lr_idx, allslices, cumulative_volumes, cumulative_total_volumes):
+				data_1 = 0.0
+
+				t1 = 0.0
+				t2 = 0.0
+				for idx in range(len(allslices)):
+					slices = allslices[idx]
+
+					last_val = 0.0
+					if idx != 0:
+						last_val = allslices[idx-1][-1][2]
+
+					if not len(slices):
+						continue
+
+					for dt,delta,t,voldat in slices:
+						vol = voldat['delta'][lr_idx+1]
+
+						if not len(cumulative_volumes):
+							cumulative_volumes.append( (dt, 0.0) )
+						if not len(cumulative_total_volumes):
+							cumulative_total_volumes.append( (dt, 0.0) )
+
+						# Because @t is cumulative, have to subtract from numerator AND denominator
+						t1 = vol_cumulative = (t-last_val)*vol / (slices[-1][2]-last_val)
+
+						t2 = vol_total_cumulative = vol_cumulative + data_1
+
+						z = datetime.timedelta(milliseconds=delta)
+						cumulative_volumes.append( (dt-z, cumulative_volumes[-1][1]) )
+						cumulative_volumes.append( (dt, vol_cumulative) )
+
+						cumulative_total_volumes.append( (dt-z, cumulative_total_volumes[-1][1]) )
+						cumulative_total_volumes.append( (dt, vol_total_cumulative) )
+
+					# Save this last one so it can be added into vol_total_cumulative for next slices block
+					data_1 = vol_cumulative
+
+				return (t1,t2)
+
+			def thirdpass(lf_idx, allslices):
+				if self.DeviceID != 1:
+					return
+
+				lights = []
+				darks = []
+
+				for idx in range(len(allslices)):
+					slices = allslices[idx]
+
+					for dt,delta,t,voldat in slices:
+						ret = self.TimeData.GetTime(dt.time())
+						if ret == 'light':
+							lights.append( (dt,delta,t,voldat) )
+						elif ret == 'dark':
+							darks.append( (dt,delta,t,voldat) )
+						else:
+							raise ValueError("Unknown light-dark phase for time %s: %d" % (str(dt),ret))
+
+				print(lights)
+				print(darks)
+
+			left_t,left_allslices = firstpass(self.Lefts, self.LeftVsTime, self.LeftCumulative, self.LeftBouts, self.LeftInterbouts)
+			right_t,right_allslices = firstpass(self.Rights, self.RightVsTime, self.RightCumulative, self.RightBouts, self.RightInterbouts)
+
+			left_c_vol,left_ct_vol = secondpass(0, left_allslices, self.LeftCumulativeVolume, self.LeftCumulativeTotalVolume)
+			right_c_vol,right_ct_vol = secondpass(1, right_allslices, self.RightCumulativeVolume, self.RightCumulativeTotalVolume)
+
+			thirdpass(0, left_allslices)
+			#thirdpass(1, right_allslices)
+
+			# Not the most efficient way but easy to write
+			mindt = min(map(lambda _:_[0], self.Lefts + self.Rights))
+			maxdt = max(map(lambda _:_[0], self.Lefts + self.Rights))
+			minms = min(map(lambda _:_[1], self.Lefts + self.Rights))
+			maxms = max(map(lambda _:_[1], self.Lefts + self.Rights))
 
 		# Set the spans of the time data
 		self.Spandt = (mindt, maxdt)
 		self.Spanms = (minms, maxms)
 
-		# Ensure start and end are the same
-		self.LeftCumulative.insert(0, (mindt, 0.0) )
-		self.LeftCumulative.append( (maxdt, left_t) )
-		self.RightCumulative.insert(0, (mindt, 0.0) )
-		self.RightCumulative.append( (maxdt, right_t) )
+		if False:
+			# Ensure start and end are the same
+			self.LeftCumulative.insert(0, (mindt, 0.0) )
+			self.LeftCumulative.append( (maxdt, left_t) )
+			self.RightCumulative.insert(0, (mindt, 0.0) )
+			self.RightCumulative.append( (maxdt, right_t) )
 
-		self.LeftCumulativeVolume.insert(0, (mindt, 0.0) )
-		self.LeftCumulativeVolume.append( (maxdt, left_c_vol) )
-		self.RightCumulativeVolume.insert(0, (mindt, 0.0) )
-		self.RightCumulativeVolume.append( (maxdt, right_c_vol) )
+			self.LeftCumulativeVolume.insert(0, (mindt, 0.0) )
+			self.LeftCumulativeVolume.append( (maxdt, left_c_vol) )
+			self.RightCumulativeVolume.insert(0, (mindt, 0.0) )
+			self.RightCumulativeVolume.append( (maxdt, right_c_vol) )
 
-		self.LeftCumulativeTotalVolume.insert(0, (mindt, 0.0) )
-		self.LeftCumulativeTotalVolume.append( (maxdt, left_ct_vol) )
-		self.RightCumulativeTotalVolume.insert(0, (mindt, 0.0) )
-		self.RightCumulativeTotalVolume.append( (maxdt, right_ct_vol) )
+			self.LeftCumulativeTotalVolume.insert(0, (mindt, 0.0) )
+			self.LeftCumulativeTotalVolume.append( (maxdt, left_ct_vol) )
+			self.RightCumulativeTotalVolume.insert(0, (mindt, 0.0) )
+			self.RightCumulativeTotalVolume.append( (maxdt, right_ct_vol) )
 
-		# Sort the data
-		self.LeftBouts.sort()
-		self.LeftInterbouts.sort()
-		self.RightBouts.sort()
-		self.RightInterbouts.sort()
+			# Sort the data
+			self.LeftBouts.sort()
+			self.LeftInterbouts.sort()
+			self.RightBouts.sort()
+			self.RightInterbouts.sort()
 
-		# Calculate all the stats
-		self.LeftBoutStats = StatBot(self.LeftBouts)
-		self.LeftInterboutStats = StatBot(self.LeftInterbouts)
-		self.RightBoutStats = StatBot(self.RightBouts)
-		self.RightInterboutStats = StatBot(self.RightInterbouts)
+			# Calculate all the stats
+			self.LeftBoutStats = StatBot(self.LeftBouts)
+			self.LeftInterboutStats = StatBot(self.LeftInterbouts)
+			self.RightBoutStats = StatBot(self.RightBouts)
+			self.RightInterboutStats = StatBot(self.RightInterbouts)
 
 		self.IsProcessed = True
 

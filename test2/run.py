@@ -166,6 +166,7 @@ def allfiles():
 		print("\n\n")
 		print(o.Filename)
 		o.Process()
+		raise ValueError
 
 		#printstats(o)
 
