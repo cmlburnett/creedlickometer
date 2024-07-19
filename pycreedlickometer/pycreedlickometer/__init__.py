@@ -212,17 +212,30 @@ class VolumeData:
 				if idx == 0:
 					raise ValueError("Time requested (%s) is before all available data, cannot give a volume" % dt)
 				else:
-					pre = filtered[idx-1]
+					for lidx in range(1,idx):
+						pre_l = filtered[idx-lidx]
+						if pre_l[3] is not None:
+							break
+					else:
+						raise ValueError("Unable to find a prior left value starting at index %d" % idx)
+
+					for ridx in range(1,idx):
+						pre_r = filtered[idx-ridx]
+						if pre_r[4] is not None:
+							break
+					else:
+						raise ValueError("Unable to find a prior right value starting at index %d" % idx)
+
 					post = entry
 
 					return {
 						# This should be a unique index per device but is meaningless to compare before/after adding data
 						'index': idx,
 						# Pre and post (datetime, left, right)
-						'pre': (pre[0], pre[3], pre[4]),
+						'pre': (pre_l[0], pre_l[3], pre_r[4]),
 						'post': (post[0], post[3], post[4]),
 						# Change in time and volumes of this time span
-						'delta': (post[0]-pre[0], pre[3]-post[3], pre[4]-post[4])
+						'delta': (post[0]-pre_l[0], pre_l[3]-post[3], pre_r[4]-post[4])
 					}
 			else:
 				# Haven't bounded yet, loop again
@@ -653,8 +666,14 @@ class CreedLickometer:
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
 
+		print("-"*140)
+		print(self.Filename)
+		print("-"*140)
+
 		def topandas(lr_idx, entries, volume_pdf):
 			bouts = []
+			ld_phase_last = None
+			ld_phase_idx = 0
 			for idx,row in enumerate(entries):
 				dt,ms,beam,delta = row
 				if not beam:
@@ -670,6 +689,13 @@ class CreedLickometer:
 						continue
 					lightdat = self.TimeData.GetTime(dt)
 
+					# Calculate a running phase index of light/datk so that it can be grouped
+					if ld_phase_last is None:
+						ld_phase_last = lightdat
+					if lightdat != ld_phase_last:
+						ld_phase_last = lightdat
+						ld_phase_idx += 1
+
 					if voldat['index'] not in volume_pdf:
 						volume_pdf[ voldat['index'] ] = voldat['delta'][1+lr_idx]
 
@@ -682,6 +708,7 @@ class CreedLickometer:
 						'volume': voldat['delta'][1+lr_idx],
 						'volume_index': voldat['index'],
 						'light': lightdat == 'light',
+						'light_idx': ld_phase_idx
 					})
 			return pd.DataFrame(bouts)
 
@@ -709,31 +736,69 @@ class CreedLickometer:
 		# Assume an empty file
 		mindt = maxdt = minms = maxms = None
 
+		def o(data, cdf):
+			# Calculate the cumulative sum of the delta (this sums the delta for the entire series)
+			data['delta_total_cdf'] = data['delta'].cumsum()
+			# Best way I found to do this is to copy the volume index first, them map that column using the CDF data generated
+			data['volume_cumulative_base'] = data['volume_index']
+			data['volume_cumulative_base'] = data['volume_cumulative_base'].map(cdf.get)
+
+			grp = data.groupby('volume_index')
+			data['delta_cdf'] = grp['delta'].cumsum()
+
+			# Create new columns of data ultimately to get cumulative_volume and cumulative_total_volume
+			def f1(g):
+				g['vol_delta_pdf'] = g['delta'] * g['volume']
+				g['vol_delta_cdf'] = g['delta_cdf'] * g['volume']
+				g['step_volume'] = g['vol_delta_pdf'] / g['delta'].sum()
+				g['cumulative_volume'] = g['vol_delta_cdf'] / g['delta'].sum()
+				g['cumulative_total_volume'] = g['cumulative_volume'] + g['volume_cumulative_base']
+				return g
+
+			# Calculate the other values and back copy into @data (have to do droplevel(0) to reduce index so data can be inserted back into the frame)
+			#   https://stackoverflow.com/questions/20737811/attaching-a-calculated-column-to-an-existing-dataframe-raises-typeerror-incompa
+			g = grp.apply(f1)
+			data['vol_delta_pdf'] = g['vol_delta_pdf'].droplevel(0)
+			data['vol_delta_cdf'] = g['vol_delta_cdf'].droplevel(0)
+			data['step_volume'] = g['step_volume'].droplevel(0)
+			data['cumulative_volume'] = g['cumulative_volume'].droplevel(0)
+			data['cumulative_total_volume'] = g['cumulative_total_volume'].droplevel(0)
+
+			# Split up by light phase index and create pdf function (no need for cdf of this)
+			grp = data.groupby('light_idx')
+			def f2(g):
+				g['lightdark_phase_volume_pdf'] = g['step_volume']
+				return g
+
+			y = grp.apply(f2)
+			data['lightdark_phase_volume_pdf'] = y['lightdark_phase_volume_pdf'].droplevel(0)
+
+			# No group by light or dark phase to create cdf for each phase over the whole data range
+			grp = data.groupby('light')
+			data['lightdark_phase_total_volume_cdf'] = grp['lightdark_phase_volume_pdf'].cumsum()
+
+			data['light_phase_total_volume_cdf'] = None
+			data['dark_phase_total_volume_cdf'] = None
+
+			# Using a mask of light and dark phase to copy data from lightdark_phase_total_volume_cdf
+			# Eseentially just splits 'lightdark_phase_total_volume_cdf' into two columns
+			mask = data['light'] == True
+			data.loc[mask, 'light_phase_total_volume_cdf'] = data.loc[mask, 'lightdark_phase_total_volume_cdf']
+			mask = data['light'] == False
+			data.loc[mask, 'dark_phase_total_volume_cdf'] = data.loc[mask, 'lightdark_phase_total_volume_cdf']
+
+			return data
+
+		# Process left data
 		if len(left):
 			mindt = left['start_dt'].min()
 			maxdt = left['end_dt'].max()
 			minms = left['start_ms'].min()
 			maxms = left['end_ms'].max()
 
-			w = left.groupby('volume_index')
+			left = o(left, left_volume_cdf)
 
-			# Calculate the cumulative sum of the delta (this sums the delta for the entire series)
-			left['delta_total_cdf'] = left['delta'].cumsum()
-			# Best way I found to do this is to copy the volume index first, them map that column using the CDF data generated
-			left['volume_cumulative_base'] = left['volume_index']
-			left['volume_cumulative_base'] = left['volume_cumulative_base'].map(left_volume_cdf.get)
-
-			# Create new columns of data ultimately to get cumulative_volume and cumulative_total_volume
-			def f(g):
-				g['delta_cdf'] = g['delta'].cumsum()
-				g['vol_delta_cdf'] = g['delta_cdf'] * g['volume']
-				g['cumulative_volume'] = g['vol_delta_cdf'] / g['delta'].sum()
-				g['cumulative_total_volume'] = g['cumulative_volume'] + g['volume_cumulative_base']
-				return g
-
-			x = left.groupby("volume_index").apply(f)
-			print(x)
-
+		# Process right data
 		if len(right):
 			if len(left):
 				mindt = min(mindt, right['start_dt'].min())
@@ -746,24 +811,7 @@ class CreedLickometer:
 				minms = right['start_ms'].min()
 				maxms = right['end_ms'].max()
 
-			w = right.groupby('volume_index')
-
-			# Calculate the cumulative sum of the delta (this sums the delta for the entire series)
-			right['delta_total_cdf'] = right['delta'].cumsum()
-			# Best way I found to do this is to copy the volume index first, them map that column using the CDF data generated
-			right['volume_cumulative_base'] = right['volume_index']
-			right['volume_cumulative_base'] = right['volume_cumulative_base'].map(right_volume_cdf.get)
-
-			# Create new columns of data ultimately to get cumulative_volume and cumulative_total_volume
-			def f(g):
-				g['delta_cdf'] = g['delta'].cumsum()
-				g['vol_delta_cdf'] = g['delta_cdf'] * g['volume']
-				g['cumulative_volume'] = g['vol_delta_cdf'] / g['delta'].sum()
-				g['cumulative_total_volume'] = g['cumulative_volume'] + g['volume_cumulative_base']
-				return g
-
-			x = right.groupby("volume_index").apply(f)
-			print(x)
+			right = o(right, right_volume_cdf)
 
 		if False:
 			# Processing performed in two passes
