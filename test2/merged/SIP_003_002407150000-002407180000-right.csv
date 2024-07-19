@@ -1,0 +1,3 @@
+,start_dt,start_ms,end_dt,end_ms,delta,volume,volume_index,light,light_idx,delta_total_cdf,volume_cumulative_base,delta_cdf,vol_delta_pdf,vol_delta_cdf,step_volume,cumulative_volume,cumulative_total_volume,lightdark_phase_volume_pdf,lightdark_phase_total_volume_cdf,light_phase_total_volume_cdf,dark_phase_total_volume_cdf
+0,2024-07-17 20:23:28,127136,2024-07-17 20:23:29,127613,477,0.5,3,False,0,477,0.0,477,238.5,238.5,0.25,0.25,0.25,0.25,0.25,,0.25
+1,2024-07-17 20:27:22,192613,2024-07-17 20:27:23,193090,477,0.5,3,False,0,954,0.0,954,238.5,477.0,0.25,0.5,0.5,0.25,0.5,,0.5
