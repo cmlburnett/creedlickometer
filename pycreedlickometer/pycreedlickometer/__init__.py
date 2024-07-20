@@ -43,10 +43,13 @@ class StatBot:
 			self.Span = self.Maximum - self.Minimum
 			self.Mean = self.Sum / self.Length
 
-			q = np.quantile(self.Data, [0.25,0.5,0.75])
+			q = np.quantile(self.Data, [0.25,0.5,0.75,0.90,0.95,0.99])
 			self.Quartile25 = q[0]
 			self.Median = q[1]
 			self.Quartile75 = q[2]
+			self.Percentile90 = q[3]
+			self.Percentile95 = q[4]
+			self.Percentile99 = q[5]
 			self.IQR = q[2]-q[0]
 
 class TimeData:
@@ -855,6 +858,7 @@ class CreedLickometer:
 		self.LeftInterboutStats = StatBot(self.LeftInterbouts)
 		self.RightBoutStats = StatBot(self.RightBouts)
 		self.RightInterboutStats = StatBot(self.RightInterbouts)
+		self.TotalBoutStats = StatBot(self.LeftBouts + self.RightBouts)
 
 		self.IsProcessed = True
 
@@ -1254,19 +1258,20 @@ class CreedLickometer:
 
 		# Section labels
 		ws['A1'] = 'Bouts'
-		ws['A23'] = 'Interbouts'
+		ws['A29'] = 'Interbouts'
+		ws['A57'] = 'Total'
 
 		# Same row headers for bouts and interbouts
-		header = ['N', 'Sum', 'Min', 'Max', 'Mean', 'Q25', 'Q50', 'Q75', 'IQR']
+		header = ['N', 'Sum', 'Min', 'Max', 'Mean', 'Q25', 'Q50', 'Q75', 'IQR','P90','P95','P99']
 
 		# Put in device IDs as columns for each section
-		for pos in ([2,5], [24,5]): # E2 and E24
+		for pos in ([2,5], [30,5], [58,5]): # E2 and E30 and E58
 			for obj in objs:
 				ws.cell(pos[0],pos[1]+0).value = obj.DeviceID
 				pos[1] += 1
 
 		# Make headers for each section
-		for pos in ([3,2], [25,2]): #B3 and B25
+		for pos in ([3,2], [31,2], [59,2]): #B3 and B31 and B59
 			for h in header:
 				# Header info
 				ws.cell(pos[0]+0, pos[1]).value = h
@@ -1290,8 +1295,8 @@ class CreedLickometer:
 			left = obj.LeftBoutStats
 			right = obj.RightBoutStats
 
-			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
-			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
 			for attr in attrs:
 				l = getattr(left, attr)
 				r = getattr(right, attr)
@@ -1307,15 +1312,15 @@ class CreedLickometer:
 		# Inject data
 		for cnt,obj in enumerate(objs):
 			# Increment row for each object
-			pos = [25,5+cnt] # E3
+			pos = [31,5+cnt] # E31
 
 			idx = 0
 
 			left = obj.LeftInterboutStats
 			right = obj.RightInterboutStats
 
-			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
-			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR']
+			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
 			for attr in attrs:
 				l = getattr(left, attr)
 				r = getattr(right, attr)
@@ -1328,8 +1333,47 @@ class CreedLickometer:
 					ws.cell(pos[0]+idx+1, pos[1]).value = r
 				idx += 2
 
+		# Inject data
+		fulldata = []
+		for cnt,obj in enumerate(objs):
+			# Increment row for each object
+			pos = [58,5+cnt] # E58
+
+			idx = 0
+
+			fulldata += obj.LeftBouts + obj.RightBouts
+			r = obj.TotalBoutStats
+
+			attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+			possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+			for attr in attrs:
+				o = getattr(r, attr)
+
+				if attr in possnull:
+					ws.cell(pos[0]+idx+1, pos[1]).value = o or ""
+				else:
+					ws.cell(pos[0]+idx+1, pos[1]).value = o
+				idx += 2
+
+		# Show full stats data in last column
+		fullstats = StatBot(fulldata)
+		attrs = ['Length', 'Sum', 'Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+		possnull = ['Minimum', 'Maximum', 'Mean', 'Quartile25', 'Median', 'Quartile75', 'IQR', 'Percentile90', 'Percentile95', 'Percentile99']
+		pos = [58,5+cnt+1]
+		idx = 0
+		for attr in attrs:
+			o = getattr(fullstats, attr)
+
+			if attr in possnull:
+				ws.cell(pos[0]+idx+1, pos[1]).value = o or ""
+			else:
+				ws.cell(pos[0]+idx+1, pos[1]).value = o
+			idx += 2
+
+
 		try:
 			os.unlink(fname)
 		except:
 			pass
 		wb.save(fname)
+
