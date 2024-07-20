@@ -1370,7 +1370,6 @@ class CreedLickometer:
 				ws.cell(pos[0]+idx+1, pos[1]).value = o
 			idx += 2
 
-
 		try:
 			os.unlink(fname)
 		except:
