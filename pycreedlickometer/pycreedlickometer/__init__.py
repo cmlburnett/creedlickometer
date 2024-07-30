@@ -215,14 +215,14 @@ class VolumeData:
 				if idx == 0:
 					raise ValueError("Time requested (%s) is before all available data, cannot give a volume" % dt)
 				else:
-					for lidx in range(1,idx):
+					for lidx in range(0,idx):
 						pre_l = filtered[idx-lidx]
 						if pre_l[3] is not None:
 							break
 					else:
 						raise ValueError("Unable to find a prior left value starting at index %d" % idx)
 
-					for ridx in range(1,idx):
+					for ridx in range(0,idx):
 						pre_r = filtered[idx-ridx]
 						if pre_r[4] is not None:
 							break
@@ -376,7 +376,17 @@ class CreedLickometer:
 		if fname is None:
 			fname = self.Filename
 
-		with open(fname, 'w') as f:
+		if isinstance(fname, str):
+			with open(fname, 'w') as f:
+				w = csv.writer(f)
+				w.writerow(header)
+
+				for row in rows:
+					w.writerow(row)
+		else:
+			# Treat as write-able object instead
+			f = fname
+
 			w = csv.writer(f)
 			w.writerow(header)
 
@@ -681,7 +691,7 @@ class CreedLickometer:
 					try:
 						voldat = pycl.VolumeData.GetVolume(dt, self.DeviceID)
 					except ValueError as e:
-						print([dt,e])
+						print(['getvolume error', dt, self.DeviceID, e])
 						continue
 					lightdat = pycl.TimeData.GetTime(dt)
 
@@ -754,11 +764,11 @@ class CreedLickometer:
 			# Calculate the other values and back copy into @data (have to do droplevel(0) to reduce index so data can be inserted back into the frame)
 			#   https://stackoverflow.com/questions/20737811/attaching-a-calculated-column-to-an-existing-dataframe-raises-typeerror-incompa
 			g = grp.apply(f1)
-			data['vol_delta_pdf'] = g['vol_delta_pdf'].droplevel(0)
-			data['vol_delta_cdf'] = g['vol_delta_cdf'].droplevel(0)
-			data['step_volume'] = g['step_volume'].droplevel(0)
-			data['cumulative_volume'] = g['cumulative_volume'].droplevel(0)
-			data['cumulative_total_volume'] = g['cumulative_total_volume'].droplevel(0)
+			data['vol_delta_pdf'] = g['vol_delta_pdf']
+			data['vol_delta_cdf'] = g['vol_delta_cdf']
+			data['step_volume'] = g['step_volume']
+			data['cumulative_volume'] = g['cumulative_volume']
+			data['cumulative_total_volume'] = g['cumulative_total_volume']
 
 			# Split up by light phase index and create pdf function (no need for cdf of this)
 			grp = data.groupby('light_idx')
@@ -767,7 +777,7 @@ class CreedLickometer:
 				return g
 
 			y = grp.apply(f2)
-			data['lightdark_phase_volume_pdf'] = y['lightdark_phase_volume_pdf'].droplevel(0)
+			data['lightdark_phase_volume_pdf'] = y['lightdark_phase_volume_pdf']
 
 			# No group by light or dark phase to create cdf for each phase over the whole data range
 			grp = data.groupby('light')
@@ -868,7 +878,7 @@ class CreedLickometer:
 		"""
 
 		fig,axes = pyplot.subplots(2)
-		fig.suptitle("VsTime for %s" % fname)
+		fig.suptitle("VsTime")
 
 		axes[0].set_ylabel("Left (# Bouts)")
 		axes[1].set_ylabel("Right (# Bouts)")
@@ -940,7 +950,7 @@ class CreedLickometer:
 		"""
 
 		fig,axes = pyplot.subplots(2)
-		fig.suptitle("Bout Repititions for %s" % fname)
+		fig.suptitle("Bout Repititions")
 
 		axes[0].set_ylabel("Left (# Bouts)")
 		axes[1].set_ylabel("Right (# Bouts)")
@@ -1031,7 +1041,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
-		fig.suptitle("Cumulative Bout Times for %s" % fname)
+		fig.suptitle("Cumulative Bout Times")
 
 		axes.set_xlabel("Time (ms)")
 		axes.set_ylabel("Cumulative Time (sec)")
@@ -1070,14 +1080,15 @@ class CreedLickometer:
 		fig.savefig(fname)
 		pyplot.close()
 
-	def PlotCumulativeNormalizedVolume(self, fname):
+	def PlotCumulativeNormalizedVolume(self, fname, fname_left=None, fname_right=None):
 		"""
 		Plot cumulative volume times normalized to recorded volume over the day.
+		Provide fname_left and/or fname_right to dump left/right data into their own CSV.
 		"""
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
-		fig.suptitle("Cumulative Normalized Volume for %s" % fname)
+		fig.suptitle("Cumulative Normalized Volume")
 
 		axes.set_xlabel("Time (ms)")
 		axes.set_ylabel("Cumulative Volume (mL)")
@@ -1114,15 +1125,27 @@ class CreedLickometer:
 		fig.savefig(fname)
 		pyplot.close()
 
-		with open(fname + '-left.csv', 'w', newline='') as f:
-			w = csv.writer(f)
-			for dt,val in self.LeftCumulativeTotalVolume:
-				w.writerow([dt,val])
+		if fname_left:
+			if isinstance(fname_left, str):
+				with open(fname_left + '-left.csv', 'w', newline='') as f:
+					w = csv.writer(f)
+					for dt,val in self.LeftCumulativeTotalVolume:
+						w.writerow([dt,val])
+			else:
+				w = csv.writer(fname_left)
+				for dt,val in self.LeftCumulativeTotalVolume:
+					w.writerow([dt,val])
 
-		with open(fname + '-right.csv', 'w', newline='') as f:
-			w = csv.writer(f)
-			for dt,val in self.RightCumulativeTotalVolume:
-				w.writerow([dt,val])
+		if fname_right:
+			if isinstance(fname_right, str):
+				with open(fname + '-right.csv', 'w', newline='') as f:
+					w = csv.writer(f)
+					for dt,val in self.RightCumulativeTotalVolume:
+						w.writerow([dt,val])
+			else:
+				w = csv.writer(fname_right)
+				for dt,val in self.RightCumulativeTotalVolume:
+					w.writerow([dt,val])
 
 	def PlotBoutBoxplot(self, fname, limitextremes=True):
 		"""
@@ -1132,7 +1155,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
-		fig.suptitle("Box Plot for %s" % fname)
+		fig.suptitle("Box Plot")
 
 		axes.set_ylabel('BoutTime (ms)')
 		axes.boxplot( [self.LeftBouts, self.RightBouts], labels=['Left', 'Right'])
@@ -1181,7 +1204,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
-		fig.suptitle("Bout Histogram for %s" % fname)
+		fig.suptitle("Bout Histogram")
 
 		colors = ['blue', 'orange']
 		axes.hist( [self.LeftBouts, self.RightBouts], bins=bins, color=colors, label=['Left', 'Right'])
@@ -1200,7 +1223,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1,2)
 		fig.autofmt_xdate()
-		fig.suptitle("Bout Histogram for %s" % fname)
+		fig.suptitle("Bout Histogram")
 
 		axes[0].set_xlabel('Left (Bins of Time (ms))')
 		axes[1].set_xlabel('Right (Bins of Time (ms))')
@@ -1219,7 +1242,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1)
 		fig.autofmt_xdate()
-		fig.suptitle("Interbout Histogram for %s" % fname)
+		fig.suptitle("Interbout Histogram")
 
 		colors = ['blue', 'orange']
 		axes.hist( [self.LeftInterbouts, self.RightInterbouts], bins=bins, color=colors, label=['Left', 'Right'])
@@ -1238,7 +1261,7 @@ class CreedLickometer:
 
 		fig,axes = pyplot.subplots(1,2)
 		fig.autofmt_xdate()
-		fig.suptitle("Interbout Histogram for %s" % fname)
+		fig.suptitle("Interbout Histogram")
 
 		axes[0].set_xlabel('Left (Bins of Time (ms))')
 		axes[1].set_xlabel('Right (Bins of Time (ms))')
@@ -1369,9 +1392,5 @@ class CreedLickometer:
 				ws.cell(pos[0]+idx+1, pos[1]).value = o
 			idx += 2
 
-		try:
-			os.unlink(fname)
-		except:
-			pass
 		wb.save(fname)
 
