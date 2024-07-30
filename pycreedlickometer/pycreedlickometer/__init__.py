@@ -647,6 +647,9 @@ class CreedLickometer:
 		Pass in a file name via @rawdata_fname to save raw processed data to a file (well, two files one for left and one for right).
 		"""
 
+		if not self.IsLoaded:
+			self.Load()
+
 		# Clear everything
 		self.LeftBouts = []
 		self.RightBouts = []
@@ -663,11 +666,7 @@ class CreedLickometer:
 		self.LeftCumulativeTotalVolume = []
 		self.RightCumulativeTotalVolume = []
 
-		print("-"*140)
-		print(self.Filename)
-		print("-"*140)
-
-		def topandas(lr_idx, entries, volume_pdf):
+		def topandas(pycl, lr_idx, entries, volume_pdf):
 			bouts = []
 			ld_phase_last = None
 			ld_phase_idx = 0
@@ -680,11 +679,11 @@ class CreedLickometer:
 						continue
 
 					try:
-						voldat = self.VolumeData.GetVolume(dt, self.DeviceID)
+						voldat = pycl.VolumeData.GetVolume(dt, self.DeviceID)
 					except ValueError as e:
 						print([dt,e])
 						continue
-					lightdat = self.TimeData.GetTime(dt)
+					lightdat = pycl.TimeData.GetTime(dt)
 
 					# Calculate a running phase index of light/datk so that it can be grouped
 					if ld_phase_last is None:
@@ -716,8 +715,8 @@ class CreedLickometer:
 		right_volume_pdf = {}
 		right_volume_cdf = {}
 
-		left = topandas(0, self.Lefts, left_volume_pdf)
-		right = topandas(1, self.Rights, right_volume_pdf)
+		left = topandas(self, 0, self.Lefts, left_volume_pdf)
+		right = topandas(self, 1, self.Rights, right_volume_pdf)
 
 		# Calculate volume CDF's
 		c = 0.0
